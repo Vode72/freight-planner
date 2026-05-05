@@ -1,0 +1,432 @@
+import React, { useState, useEffect } from "react";
+
+const PALLET_PRESETS = {
+  "FIN-lava": { width: 1.0, length: 1.2 },
+  "EUR-lava": { width: 0.8, length: 1.2 },
+  "Teholava": { width: "", length: "" },
+  "IBC-kontti": { width: 1.0, length: 1.2, height: 1.15 },
+  "Muu": { width: "", length: "" }
+};
+
+function OrderForm({ orderId, onSave, onCancel }) {
+  const [form, setForm] = useState({
+    order_reference: "",
+    pickup_reference: "",
+    goods_description: "",
+    incoterms: "",
+    consignor_name: "",
+    consignor_address: "",
+    consignor_country: "",
+    consignee_name: "",
+    consignee_address: "",
+    consignee_country: "",
+    loading_point_name: "",
+    loading_point_country: "",
+    loading_point_zip: "",
+    loading_point_city: "",
+    unloading_point_name: "",
+    unloading_point_country: "",
+    unloading_point_zip: "",
+    unloading_point_city: "",
+    pallet_type: "FIN-lava",
+    quantity: 1,
+    pallet_width: 1.0,
+    pallet_length: 1.2,
+    pallet_height: "",
+    weight: "",
+    stackable: false,
+    adr: false,
+    tail_lift: false,
+    insured: false,
+    high_value: false,
+    pre_advise: false,
+    time_slot_loading: false,
+    time_slot_delivery: false,
+    min_temperature: "",
+    max_temperature: "",
+    temperature_monitoring: false,
+    required_compartment: "koko kärry",
+    loading_instructions: "",
+    loading_date: "",
+    loading_time_start: "",
+    loading_time_end: "",
+    delivery_date: "",
+    delivery_time_start: "",
+    delivery_time_end: ""
+  });
+
+  const [incoterms, setIncoterms] = useState([]);
+  const [palletTypes, setPalletTypes] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+      fetch("http://127.0.0.1:5000/api/incoterms")
+        .then(r => r.json()).then(setIncoterms);
+      fetch("http://127.0.0.1:5000/api/pallet-types")
+        .then(r => r.json()).then(setPalletTypes);
+
+      if (orderId) {
+        // Muokkaus — haetaan olemassa oleva order
+        fetch(`http://127.0.0.1:5000/api/orders/${orderId}`)
+          .then(r => r.json())
+          .then(data => {
+            const cleaned = {};
+            Object.keys(data).forEach(k => {
+              cleaned[k] = data[k] === null ? "" : data[k];
+            });
+            setForm(prev => ({ ...prev, ...cleaned }));
+          });
+      } else {
+        // Uusi order — haetaan automaattinen tilausviite
+        fetch("http://127.0.0.1:5000/api/next-order-reference")
+          .then(r => r.json())
+          .then(data => {
+            setForm(prev => ({ ...prev, order_reference: data.reference }));
+          });
+      }
+    }, [orderId]);
+
+  const handleChange = (field, value) => {
+    setForm(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handlePalletTypeChange = (type) => {
+    const preset = PALLET_PRESETS[type] || {};
+    setForm(prev => ({
+      ...prev,
+      pallet_type: type,
+      pallet_width: preset.width !== undefined ? preset.width : prev.pallet_width,
+      pallet_length: preset.length !== undefined ? preset.length : prev.pallet_length,
+      pallet_height: preset.height !== undefined ? preset.height : prev.pallet_height
+    }));
+  };
+
+  const handleSubmit = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      const url = orderId
+        ? `http://127.0.0.1:5000/api/orders/${orderId}`
+        : "http://127.0.0.1:5000/api/orders";
+      const method = orderId ? "PUT" : "POST";
+      const response = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form)
+      });
+      const data = await response.json();
+      if (response.ok) {
+        onSave(data.id || orderId);
+      } else {
+        setError(data.error || "Tallennus epäonnistui");
+      }
+    } catch (err) {
+      setError("Palvelinyhteys epäonnistui");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ===== TYYLIT =====
+  const sectionStyle = {
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: "10px",
+    padding: "20px",
+    marginBottom: "16px"
+  };
+
+  const sectionTitle = {
+    color: "#f97316",
+    fontSize: "14px",
+    fontWeight: "700",
+    marginTop: 0,
+    marginBottom: "16px",
+    textTransform: "uppercase",
+    letterSpacing: "0.5px"
+  };
+
+  const labelStyle = {
+    display: "block",
+    color: "#94a3b8",
+    fontSize: "12px",
+    marginBottom: "4px"
+  };
+
+  const inputStyle = {
+    width: "100%",
+    padding: "8px 12px",
+    borderRadius: "6px",
+    border: "1px solid #475569",
+    background: "rgba(255,255,255,0.05)",
+    color: "#f1f5f9",
+    fontSize: "13px",
+    outline: "none",
+    boxSizing: "border-box"
+  };
+
+  const grid2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" };
+  const grid3 = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" };
+  const grid4 = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "12px" };
+
+  const checkboxRow = (field, label) => (
+    <label style={{
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      color: "#cbd5e1",
+      fontSize: "13px",
+      cursor: "pointer"
+    }}>
+      <input
+        type="checkbox"
+        checked={form[field] || false}
+        onChange={(e) => handleChange(field, e.target.checked)}
+        style={{ width: "16px", height: "16px", cursor: "pointer" }}
+      />
+      {label}
+    </label>
+  );
+
+  const inputField = (field, label, type = "text") => (
+    <div>
+      <label style={labelStyle}>{label}</label>
+      <input
+        type={type}
+        value={form[field] || ""}
+        onChange={(e) => handleChange(field, e.target.value)}
+        style={inputStyle}
+      />
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: "20px"
+      }}>
+        <h2 style={{ color: "#f97316", margin: 0 }}>
+          {orderId ? "✏️ Muokkaa Orderia" : "➕ Uusi Order"}
+        </h2>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button
+            onClick={onCancel}
+            style={{
+              background: "transparent",
+              color: "#94a3b8",
+              border: "1px solid #475569",
+              padding: "10px 20px",
+              borderRadius: "8px",
+              cursor: "pointer",
+              fontSize: "14px"
+            }}
+          >
+            Peruuta
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={saving}
+            style={{
+              background: "#22c55e",
+              color: "#fff",
+              border: "none",
+              padding: "10px 20px",
+              borderRadius: "8px",
+              cursor: saving ? "not-allowed" : "pointer",
+              fontWeight: "600",
+              fontSize: "14px"
+            }}
+          >
+            {saving ? "Tallennetaan..." : "💾 Tallenna"}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div style={{
+          background: "rgba(239,68,68,0.15)",
+          border: "1px solid rgba(239,68,68,0.4)",
+          borderRadius: "8px",
+          padding: "12px 16px",
+          color: "#fca5a5",
+          marginBottom: "16px"
+        }}>
+          {error}
+        </div>
+      )}
+
+      {/* PERUSTIEDOT */}
+      <div style={sectionStyle}>
+        <h3 style={sectionTitle}>📋 Perustiedot</h3>
+        <div style={grid3}>
+          {inputField("order_reference", "Tilausviite")}
+          {inputField("pickup_reference", "Noutoviite")}
+          <div>
+            <label style={labelStyle}>Incoterms</label>
+            <select
+              value={form.incoterms}
+              onChange={(e) => handleChange("incoterms", e.target.value)}
+              style={inputStyle}
+            >
+              <option value="">— Valitse —</option>
+              {incoterms.map(i => <option key={i} value={i}>{i}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{ marginTop: "12px" }}>
+          {inputField("goods_description", "Tavaran kuvaus")}
+        </div>
+      </div>
+
+      {/* CONSIGNOR */}
+      <div style={sectionStyle}>
+        <h3 style={sectionTitle}>📤 Lähettäjä (Consignor)</h3>
+        <div style={grid3}>
+          {inputField("consignor_name", "Nimi")}
+          {inputField("consignor_address", "Osoite")}
+          {inputField("consignor_country", "Maa")}
+        </div>
+      </div>
+
+      {/* CONSIGNEE */}
+      <div style={sectionStyle}>
+        <h3 style={sectionTitle}>📥 Vastaanottaja (Consignee)</h3>
+        <div style={grid3}>
+          {inputField("consignee_name", "Nimi")}
+          {inputField("consignee_address", "Osoite")}
+          {inputField("consignee_country", "Maa")}
+        </div>
+      </div>
+
+      {/* LOADING POINT */}
+      <div style={sectionStyle}>
+        <h3 style={sectionTitle}>📍 Lastauspaikka (Loading Point)</h3>
+        <div style={grid4}>
+          {inputField("loading_point_name", "Yritys")}
+          {inputField("loading_point_country", "Maa")}
+          {inputField("loading_point_zip", "Postinro")}
+          {inputField("loading_point_city", "Kaupunki")}
+        </div>
+      </div>
+
+      {/* UNLOADING POINT */}
+      <div style={sectionStyle}>
+        <h3 style={sectionTitle}>🏁 Purkupaikka (Unloading Point)</h3>
+        <div style={grid4}>
+          {inputField("unloading_point_name", "Yritys")}
+          {inputField("unloading_point_country", "Maa")}
+          {inputField("unloading_point_zip", "Postinro")}
+          {inputField("unloading_point_city", "Kaupunki")}
+        </div>
+      </div>
+
+      {/* TAVARA */}
+      <div style={sectionStyle}>
+        <h3 style={sectionTitle}>📦 Tavara ja mitat</h3>
+        <div style={grid4}>
+          <div>
+            <label style={labelStyle}>Kollityyppi</label>
+            <select
+              value={form.pallet_type}
+              onChange={(e) => handlePalletTypeChange(e.target.value)}
+              style={inputStyle}
+            >
+              {palletTypes.map(p => (
+                <option key={p.type} value={p.type}>{p.type}</option>
+              ))}
+            </select>
+          </div>
+          {inputField("quantity", "Määrä", "number")}
+          {inputField("weight", "Paino (kg)", "number")}
+          <div>
+            <label style={labelStyle}>Osasto</label>
+            <select
+              value={form.required_compartment}
+              onChange={(e) => handleChange("required_compartment", e.target.value)}
+              style={inputStyle}
+            >
+              <option value="koko kärry">Koko kärry</option>
+              <option value="etukärry">Etukärry</option>
+              <option value="takakärry">Takakärry</option>
+            </select>
+          </div>
+        </div>
+        <div style={{ ...grid3, marginTop: "12px" }}>
+          {inputField("pallet_width", "Leveys (m)", "number")}
+          {inputField("pallet_length", "Pituus (m)", "number")}
+          {inputField("pallet_height", "Korkeus (m)", "number")}
+        </div>
+      </div>
+
+      {/* LÄMPÖTILA */}
+      <div style={sectionStyle}>
+        <h3 style={sectionTitle}>🌡️ Lämpötila</h3>
+        <div style={grid3}>
+          {inputField("min_temperature", "Min °C", "number")}
+          {inputField("max_temperature", "Max °C", "number")}
+          <div style={{ display: "flex", alignItems: "flex-end", paddingBottom: "8px" }}>
+            {checkboxRow("temperature_monitoring", "Lämpötilaseuranta printille")}
+          </div>
+        </div>
+      </div>
+
+      {/* AIKAIKKUNAT */}
+      <div style={sectionStyle}>
+        <h3 style={sectionTitle}>🕐 Aikaikkunat</h3>
+        <div style={{ marginBottom: "12px", color: "#cbd5e1", fontSize: "13px" }}>
+          Lastaus
+        </div>
+        <div style={grid3}>
+          {inputField("loading_date", "Päivä", "date")}
+          {inputField("loading_time_start", "Klo alku", "time")}
+          {inputField("loading_time_end", "Klo loppu", "time")}
+        </div>
+        <div style={{ marginTop: "16px", marginBottom: "12px", color: "#cbd5e1", fontSize: "13px" }}>
+          Toimitus
+        </div>
+        <div style={grid3}>
+          {inputField("delivery_date", "Päivä", "date")}
+          {inputField("delivery_time_start", "Klo alku", "time")}
+          {inputField("delivery_time_end", "Klo loppu", "time")}
+        </div>
+      </div>
+
+      {/* LISÄPALVELUT */}
+      <div style={sectionStyle}>
+        <h3 style={sectionTitle}>✅ Lisäpalvelut ja huomiot</h3>
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr 1fr",
+          gap: "12px"
+        }}>
+          {checkboxRow("adr", "ADR (vaarallinen aine)")}
+          {checkboxRow("tail_lift", "Takalaitanostin")}
+          {checkboxRow("stackable", "Pinottava")}
+          {checkboxRow("insured", "Vakuutettu")}
+          {checkboxRow("high_value", "Korkea arvo/riski")}
+          {checkboxRow("pre_advise", "Pre-Advise Delivery")}
+          {checkboxRow("time_slot_loading", "Time slot lastaus")}
+          {checkboxRow("time_slot_delivery", "Time slot purku")}
+        </div>
+      </div>
+
+      {/* OHJEET */}
+      <div style={sectionStyle}>
+        <h3 style={sectionTitle}>📝 Lastausohjeet</h3>
+        <textarea
+          value={form.loading_instructions}
+          onChange={(e) => handleChange("loading_instructions", e.target.value)}
+          rows={3}
+          style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
+          placeholder="Esim. Käytetään liinoja sidonnassa..."
+        />
+      </div>
+    </div>
+  );
+}
+
+export default OrderForm;
