@@ -193,6 +193,39 @@ cursor.executemany("""
     VALUES (?, ?, ?, ?, ?, ?)
 """, carriers)
 
+# Trucks taulu
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS trucks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plate_number TEXT NOT NULL,
+    carrier_id INTEGER NOT NULL,
+    status TEXT DEFAULT 'Vapaa',
+    FOREIGN KEY (carrier_id) REFERENCES carriers(id)
+)
+""")
+
+# Lisätään vetäjät
+trucks = [
+    ("NRF-001", 1),
+    ("NRF-002", 1),
+    ("BLR-001", 2),
+    ("BLR-002", 2),
+    ("PHK-001", 3),
+    ("PHK-002", 3),
+    ("ETR-001", 4),
+    ("ETR-002", 4),
+    ("CTC-001", 5),
+    ("CTC-002", 5),
+    ("SCL-001", 6),
+    ("SCL-002", 6),
+]
+
+cursor.executemany("""
+    INSERT INTO trucks (plate_number, carrier_id)
+    VALUES (?, ?)
+""", trucks)
+
+
 conn.commit()
 conn.close()
 print("Tietokanta alustettu onnistuneesti.")

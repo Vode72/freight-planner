@@ -35,6 +35,7 @@ function TripForm({ tripId, onSave, onCancel }) {
   const [trailers, setTrailers] = useState([]);
   const [transportTypes, setTransportTypes] = useState([]);
   const [ferryRoutes, setFerryRoutes] = useState([]);
+  const [trucks, setTrucks] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -47,7 +48,8 @@ function TripForm({ tripId, onSave, onCancel }) {
       .then(r => r.json()).then(setTransportTypes);
     fetch("http://127.0.0.1:5000/api/ferry-routes")
       .then(r => r.json()).then(setFerryRoutes);
-
+    fetch("http://127.0.0.1:5000/api/trucks")
+      .then(r => r.json()).then(setTrucks);
     if (tripId) {
       fetch(`http://127.0.0.1:5000/api/trips/${tripId}`)
         .then(r => r.json())
@@ -63,6 +65,14 @@ function TripForm({ tripId, onSave, onCancel }) {
 
   const handleChange = (field, value) => {
     setForm(prev => ({ ...prev, [field]: value }));
+    if (field === "carrier_id" && value) {
+      fetch(`http://127.0.0.1:5000/api/trucks?carrier_id=${value}`)
+        .then(r => r.json())
+        .then(data => {
+          setTrucks(data);
+          setForm(prev => ({ ...prev, truck_plate: "" }));
+        });
+    }
   };
 
   const handleTrailerChange = (trailerId) => {
@@ -299,8 +309,22 @@ function TripForm({ tripId, onSave, onCancel }) {
                 </option>
               ))}
             </select>
+          </div>          
+          <div>
+            <label style={labelStyle}>Vetoauton rekkari</label>
+            <select
+              value={form.truck_plate || ""}
+              onChange={(e) => handleChange("truck_plate", e.target.value)}
+              style={inputStyle}
+            >
+              <option value="">— Valitse vetäjä —</option>
+              {trucks.map(t => (
+                <option key={t.id} value={t.plate_number}>
+                  {t.plate_number} — {t.carrier_name}
+                </option>
+              ))}
+            </select>
           </div>
-          {inputField("truck_plate", "Vetoauton rekkari")}
         </div>
       </div>
 

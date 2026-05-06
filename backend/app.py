@@ -252,6 +252,31 @@ def get_carriers():
     return jsonify([dict(c) for c in carriers])
 
 
+# ===== TRUCKS =====
+
+@app.route("/api/trucks", methods=["GET"])
+def get_trucks():
+    carrier_id = request.args.get("carrier_id")
+    conn = get_db_connection()
+    if carrier_id:
+        trucks = conn.execute("""
+            SELECT t.*, c.name as carrier_name
+            FROM trucks t
+            JOIN carriers c ON t.carrier_id = c.id
+            WHERE t.carrier_id = ?
+            ORDER BY t.plate_number
+        """, (carrier_id,)).fetchall()
+    else:
+        trucks = conn.execute("""
+            SELECT t.*, c.name as carrier_name
+            FROM trucks t
+            JOIN carriers c ON t.carrier_id = c.id
+            ORDER BY c.name, t.plate_number
+        """).fetchall()
+    conn.close()
+    return jsonify([dict(t) for t in trucks])
+
+
 # ===== TRIPS =====
 
 @app.route("/api/trips", methods=["GET"])
