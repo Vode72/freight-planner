@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import DatePickerField from "./DatePickerField";
 
 const PALLET_PRESETS = {
   "FIN-lava": { width: 1.0, length: 1.2 },
@@ -377,22 +378,35 @@ function OrderForm({ orderId, onSave, onCancel }) {
       {/* AIKAIKKUNAT */}
       <div style={sectionStyle}>
         <h3 style={sectionTitle}>🕐 Aikaikkunat</h3>
-        <div style={{ marginBottom: "12px", color: "#cbd5e1", fontSize: "13px" }}>
-          Lastaus
-        </div>
-        <div style={grid3}>
-          {inputField("loading_date", "Päivä", "date")}
-          {inputField("loading_time_start", "Klo alku", "time")}
-          {inputField("loading_time_end", "Klo loppu", "time")}
-        </div>
-        <div style={{ marginTop: "16px", marginBottom: "12px", color: "#cbd5e1", fontSize: "13px" }}>
-          Toimitus
-        </div>
-        <div style={grid3}>
-          {inputField("delivery_date", "Päivä", "date")}
-          {inputField("delivery_time_start", "Klo alku", "time")}
-          {inputField("delivery_time_end", "Klo loppu", "time")}
-        </div>
+          <div style={{ marginBottom: "12px", color: "#cbd5e1", fontSize: "13px" }}>
+            Lastaus
+          </div>
+          <div style={grid3}>
+            <DatePickerField
+              label="Päivä"
+              value={form.loading_date}
+              onChange={(val) => handleChange("loading_date", val)}
+              labelStyle={labelStyle}
+              inputStyle={inputStyle}
+            />
+            {inputField("loading_time_start", "Klo alku", "time")}
+            {inputField("loading_time_end", "Klo loppu", "time")}
+          </div>
+          <div style={{ marginTop: "16px", marginBottom: "12px", color: "#cbd5e1", fontSize: "13px" }}>
+            Toimitus
+          </div>
+          <div style={grid3}>
+            <DatePickerField
+              label="Päivä"
+              value={form.delivery_date}
+              onChange={(val) => handleChange("delivery_date", val)}
+              labelStyle={labelStyle}
+              inputStyle={inputStyle}
+            />
+            {inputField("delivery_time_start", "Klo alku", "time")}
+            {inputField("delivery_time_end", "Klo loppu", "time")}
+          </div>
+        
       </div>
 
       {/* LISÄPALVELUT */}
