@@ -70,7 +70,8 @@ COST_CODES = [
     {"code": "220", "description": "MANTEREEN AJO", "type": "cost"},
     {"code": "300", "description": "SAKSAN TIEMAKSU", "type": "cost"},
     {"code": "310", "description": "HOLLANTI + SAKSA TIEMAKSU", "type": "cost"},
-    {"code": "400", "description": "TRAILERVUOKRA", "type": "cost"},
+    {"code": "400", "description": "TRAILERVUOKRA (osto)", "type": "cost"},
+    {"code": "401", "description": "TRAILERVUOKRA (myynti)", "type": "revenue"},    
     {"code": "410", "description": "TRAILERIN TANKKAUS", "type": "cost"},
     {"code": "500", "description": "LAUTTAKUSTANNUS", "type": "cost"},
     {"code": "510", "description": "SATAMAMAKSU", "type": "cost"},
@@ -81,6 +82,8 @@ COST_CODES = [
     {"code": "800", "description": "ODOTUSAIKA", "type": "cost"},
     {"code": "810", "description": "LISÄKÄSITTELY", "type": "cost"},
     {"code": "820", "description": "MUU KULU", "type": "cost"},
+    {"code": "830", "description": "TRAILERIN YLIKÄYTTÖ (osto)", "type": "cost"},
+    {"code": "831", "description": "TRAILERIN YLIKÄYTTÖ (myynti)", "type": "revenue"},
 ]
 
 PALLET_TYPES = [
@@ -466,7 +469,6 @@ def update_trip(trip_id):
     conn.close()
     return jsonify({"message": "Keikka päivitetty"})
 
-
 @app.route("/api/trips/<int:trip_id>/status", methods=["PUT"])
 def update_trip_status(trip_id):
     conn = get_db_connection()
@@ -488,6 +490,41 @@ def update_trip_status(trip_id):
         return jsonify({"error": "Virheellinen status"}), 400
 
     conn.execute("UPDATE trips SET status = ? WHERE id = ?", (new_status, trip_id))
+
+    if new_status == "Vahvistettu":
+        trip_data = conn.execute("""
+            SELECT t.*, tr.leasing_rate, tr.rental_rate
+            FROM trips t
+            LEFT JOIN trailers tr ON t.trailer_id = tr.id
+            WHERE t.id = ?
+        """, (trip_id,)).fetchone()
+
+        if trip_data and trip_data["loading_date"] and trip_data["delivery_date"] and trip_data["trailer_id"]:
+            from datetime import date
+            loading = date.fromisoformat(trip_data["loading_date"])
+            delivery = date.fromisoformat(trip_data["delivery_date"])
+            days = (delivery - loading).days + 1
+
+            if days > 0 and trip_data["leasing_rate"] and trip_data["rental_rate"]:
+                existing = conn.execute("""
+                    SELECT id FROM costs
+                    WHERE trip_id = ? AND cost_code IN ('400', '401')
+                """, (trip_id,)).fetchone()
+
+                if not existing:
+                    osto = round(days * trip_data["leasing_rate"], 2)
+                    myynti = round(days * trip_data["rental_rate"], 2)
+
+                    conn.execute("""
+                        INSERT INTO costs (trip_id, cost_code, description, amount, cost_type)
+                        VALUES (?, '400', ?, ?, 'cost')
+                    """, (trip_id, f"TRAILERVUOKRA (osto) {days} pv x {trip_data['leasing_rate']} €", osto))
+
+                    conn.execute("""
+                        INSERT INTO costs (trip_id, cost_code, description, amount, cost_type)
+                        VALUES (?, '401', ?, ?, 'revenue')
+                    """, (trip_id, f"TRAILERVUOKRA (myynti) {days} pv x {trip_data['rental_rate']} €", myynti))
+
     conn.commit()
     conn.close()
     return jsonify({"message": "Status päivitetty"})
