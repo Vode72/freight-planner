@@ -251,6 +251,234 @@ cursor.executemany("""
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """, customers)
 
+# === DEMO TRIPS ===
+trips_demo = [
+    # (trip_id, status, fp_country, fp_zip, fp_city, te_country, te_zip, te_city,
+    #  transport_type, carrier_id, trailer_id, trailer_type, truck_plate,
+    #  loading_date, loading_time_start, loading_time_end,
+    #  delivery_date, delivery_time_start, delivery_time_end,
+    #  ferry_route, ferry_departure, ferry_arrival,
+    #  adr, tail_lift, temperature_controlled, fixed_delivery_date)
+    ("TRP-2026-001", "Suunniteltu",
+     "FI", "00160", "Helsinki", "DE", "20537", "Hamburg", "Suora",
+     1, 1, "Umpikaappi", "NRF-001",
+     "2026-05-14", "07:00", "09:00", "2026-05-16", "08:00", "12:00",
+     None, None, None, 0, 0, 0, 0),
+
+    ("TRP-2026-002", "Vahvistettu",
+     "FI", "20100", "Turku", "SE", "11120", "Stockholm", "Lautta",
+     6, 4, "Sivuaukeava", "SCL-001",
+     "2026-05-12", "06:00", "08:00", "2026-05-13", "14:00", "16:00",
+     "Turku-Stockholm", "2026-05-12 20:00", "2026-05-13 09:00", 0, 0, 0, 0),
+
+    ("TRP-2026-003", "Käynnissä",
+     "FI", "00160", "Helsinki", "NL", "3013", "Rotterdam", "Suora",
+     2, 8, "Pressutrailer", "BLR-001",
+     "2026-05-08", "07:00", "09:00", "2026-05-12", "10:00", "14:00",
+     None, None, None, 0, 0, 0, 0),
+
+    ("TRP-2026-004", "Toimitettu",
+     "FI", "90100", "Oulu", "DE", "60329", "Frankfurt", "Suora",
+     4, 6, "Umpikaappi 2-koneinen", "ETR-001",
+     "2026-05-02", "07:00", "10:00", "2026-05-05", "09:00", "13:00",
+     None, None, None, 0, 0, 0, 1),
+
+    ("TRP-2026-005", "Laskutettu",
+     "FI", "00160", "Helsinki", "EE", "10111", "Tallinn", "Lautta",
+     1, 2, "Umpikaappi", "NRF-002",
+     "2026-04-28", "08:00", "10:00", "2026-04-29", "12:00", "15:00",
+     "Helsinki-Tallinn", "2026-04-28 20:00", "2026-04-29 07:00", 0, 0, 0, 0),
+
+    ("TRP-2026-006", "Vahvistettu",
+     "FI", "33100", "Tampere", "PL", "00-001", "Varsova", "Suora",
+     3, 11, "Megatrailer", "PHK-001",
+     "2026-05-15", "06:00", "09:00", "2026-05-19", "10:00", "14:00",
+     None, None, None, 0, 0, 0, 0),
+
+    ("TRP-2026-007", "Suunniteltu",
+     "FI", "02100", "Espoo", "NO", "0150", "Oslo", "Suora",
+     2, 5, "Sivuaukeava", "BLR-002",
+     "2026-05-20", "07:00", "09:00", "2026-05-22", "10:00", "14:00",
+     None, None, None, 0, 0, 0, 0),
+]
+
+trip_db_ids = []
+for t in trips_demo:
+    cursor.execute("""
+        INSERT INTO trips (trip_id, status,
+            first_pickup_country, first_pickup_zip, first_pickup_city,
+            trip_end_country, trip_end_zip, trip_end_city, transport_type,
+            carrier_id, trailer_id, trailer_type, truck_plate,
+            loading_date, loading_time_start, loading_time_end,
+            delivery_date, delivery_time_start, delivery_time_end,
+            ferry_route, ferry_departure, ferry_arrival,
+            adr, tail_lift, temperature_controlled, fixed_delivery_date)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, t)
+    trip_db_ids.append(cursor.lastrowid)
+
+# === DEMO ORDERS ===
+# status: Tilattu (assigned, not yet moving), Käynnissä, Toimitettu
+orders_demo = [
+    # Trip 1 — TRP-2026-001 Suunniteltu FI→DE
+    ("ORD-2026-001", trip_db_ids[0], "Tilattu", "KNC-2026-1401",
+     "Nosturikomponentit", "DAP",
+     "Konecranes Oyj", "Koneenkatu 8, 05830 Hyvinkää", "FI",
+     "ThyssenKrupp AG", "Kaiser-Wilhelm-Str. 100, 47259 Duisburg", "DE",
+     "Konecranes Oyj", "FI", "05830", "Hyvinkää",
+     "ThyssenKrupp AG", "DE", "47259", "Duisburg",
+     "EUR", 12, 5.4, 42.5, 8200,
+     "2026-05-14", "2026-05-16"),
+
+    ("ORD-2026-002", trip_db_ids[0], "Tilattu", "UPM-2026-0514",
+     "Paperi", "DAP",
+     "UPM-Kymmene Oyj", "Alvar Aallon katu 1, 00100 Helsinki", "FI",
+     "Mayr-Melnhof GmbH", "Brahmsplatz 6, 1040 Wien", "DE",
+     "UPM-Kymmene Oyj", "FI", "00100", "Helsinki",
+     "Mayr-Melnhof GmbH", "DE", "47800", "Krefeld",
+     "EUR", 18, 3.8, 28.6, 6400,
+     "2026-05-14", "2026-05-16"),
+
+    # Trip 2 — TRP-2026-002 Vahvistettu FI→SE
+    ("ORD-2026-003", trip_db_ids[1], "Tilattu", "WHR-2026-0512",
+     "Elintarvikkeet", "DAP",
+     "Wihuri Oy", "Sörnäistenkatu 6, 00580 Helsinki", "FI",
+     "Axfood AB", "Solnavägen 3C, 11927 Stockholm", "SE",
+     "Wihuri Oy", "FI", "20810", "Turku",
+     "Axfood AB", "SE", "11927", "Stockholm",
+     "EUR", 32, 8.0, 62.4, 12000,
+     "2026-05-12", "2026-05-13"),
+
+    # Trip 3 — TRP-2026-003 Käynnissä FI→NL
+    ("ORD-2026-004", trip_db_ids[2], "Käynnissä", "KSK-2026-0508",
+     "Teollisuuskemikaalit", "CPT",
+     "Kesko Logistics Oy", "Satamakatu 5, 00160 Helsinki", "FI",
+     "Brenntag NV", "Handelstraat 87, 3013 Rotterdam", "NL",
+     "Kesko Logistics Oy", "FI", "00160", "Helsinki",
+     "Brenntag NV", "NL", "3013", "Rotterdam",
+     "EUR", 22, 6.8, 51.2, 9500,
+     "2026-05-08", "2026-05-12"),
+
+    ("ORD-2026-005", trip_db_ids[2], "Käynnissä", "RKS-2026-0508",
+     "Rakennustarvikkeet", "DAP",
+     "Rautakesko Oy", "Kehräämöntie 3, 04200 Kerava", "FI",
+     "Bouwmarkt BV", "Industrieweg 45, 2700 Zoetermeer", "NL",
+     "Rautakesko Oy", "FI", "04200", "Kerava",
+     "Bouwmarkt BV", "NL", "2700", "Zoetermeer",
+     "FIN", 16, 5.2, 38.4, 11200,
+     "2026-05-08", "2026-05-12"),
+
+    ("ORD-2026-006", trip_db_ids[2], "Käynnissä", "MYR-2026-0508",
+     "Laivaosat", "EXW",
+     "Meyer Turku Oy", "Telakkakatu 1, 20810 Turku", "FI",
+     "Damen Shipyards BV", "Avelingen-West 20, 4200 Gorinchem", "NL",
+     "Meyer Turku Oy", "FI", "20810", "Turku",
+     "Damen Shipyards BV", "NL", "4200", "Gorinchem",
+     "EUR", 10, 3.5, 26.5, 4800,
+     "2026-05-08", "2026-05-12"),
+
+    # Trip 4 — TRP-2026-004 Toimitettu FI→DE
+    ("ORD-2026-007", trip_db_ids[3], "Toimitettu", "UPM-2026-0502",
+     "Paperirullat", "DAP",
+     "UPM-Kymmene Oyj", "Alvar Aallon katu 1, 00100 Helsinki", "FI",
+     "StoraEnso GmbH", "Darmstädter Landstr. 115, 60314 Frankfurt", "DE",
+     "UPM-Kymmene Oyj", "FI", "00100", "Helsinki",
+     "StoraEnso GmbH", "DE", "60329", "Frankfurt",
+     "EUR", 24, 7.6, 56.8, 14000,
+     "2026-05-02", "2026-05-05"),
+
+    ("ORD-2026-008", trip_db_ids[3], "Toimitettu", "KNC-2026-0502",
+     "Nosturiosat", "CPT",
+     "Konecranes Oyj", "Koneenkatu 8, 05830 Hyvinkää", "FI",
+     "Demag Cranes GmbH", "Ruhrstr. 28, 58300 Wetter", "DE",
+     "Konecranes Oyj", "FI", "05830", "Hyvinkää",
+     "Demag Cranes GmbH", "DE", "58300", "Wetter",
+     "EUR", 14, 4.8, 36.0, 7300,
+     "2026-05-02", "2026-05-05"),
+
+    # Trip 5 — TRP-2026-005 Laskutettu FI→EE
+    ("ORD-2026-009", trip_db_ids[4], "Toimitettu", "SRY-2026-0428",
+     "Päivittäistavarat", "DAP",
+     "S-ryhmä Logistiikka", "Fleminginkatu 34, 00510 Helsinki", "FI",
+     "Prisma Eesti AS", "Peterburi tee 2, 11415 Tallinn", "EE",
+     "S-ryhmä Logistiikka", "FI", "00510", "Helsinki",
+     "Prisma Eesti AS", "EE", "10111", "Tallinn",
+     "EUR", 42, 10.4, 81.6, 16500,
+     "2026-04-28", "2026-04-29"),
+
+    # Trip 6 — TRP-2026-006 Vahvistettu FI→PL
+    ("ORD-2026-010", trip_db_ids[5], "Tilattu", "WHR-2026-0515",
+     "Pakkausmateriaalit", "DAP",
+     "Wihuri Oy", "Sörnäistenkatu 6, 00580 Helsinki", "FI",
+     "Leroy Merlin Polska", "Al. Jerozolimskie 92, 00-807 Warszawa", "PL",
+     "Wihuri Oy", "FI", "00580", "Helsinki",
+     "Leroy Merlin Polska", "PL", "00-807", "Varsova",
+     "EUR", 18, 6.5, 50.7, 7200,
+     "2026-05-15", "2026-05-19"),
+
+    ("ORD-2026-011", trip_db_ids[5], "Tilattu", "CGT-2026-0515",
+     "Koneenvaraosat", "CPT",
+     "Cargotec Finland Oy", "Porkkalankatu 5, 00180 Helsinki", "FI",
+     "Famur SA", "ul. Armii Krajowej 51, 40-698 Katowice", "PL",
+     "Cargotec Finland Oy", "FI", "00180", "Helsinki",
+     "Famur SA", "PL", "40-698", "Katowice",
+     "EUR", 14, 4.2, 31.5, 5800,
+     "2026-05-15", "2026-05-19"),
+
+    # Trip 7 — TRP-2026-007 Suunniteltu FI→NO
+    ("ORD-2026-012", trip_db_ids[6], "Tilattu", "KSK-2026-0520",
+     "Päivittäistavaroita", "DAP",
+     "Kesko Logistics Oy", "Satamakatu 5, 00160 Helsinki", "FI",
+     "Rema 1000 AS", "Telemarksgata 8, 0579 Oslo", "NO",
+     "Kesko Logistics Oy", "FI", "00160", "Helsinki",
+     "Rema 1000 AS", "NO", "0150", "Oslo",
+     "EUR", 36, 9.2, 71.5, 13800,
+     "2026-05-20", "2026-05-22"),
+]
+
+cursor.executemany("""
+    INSERT INTO orders (order_id, trip_id, status, order_reference,
+        goods_description, incoterms,
+        consignor_name, consignor_address, consignor_country,
+        consignee_name, consignee_address, consignee_country,
+        loading_point_name, loading_point_country, loading_point_zip, loading_point_city,
+        unloading_point_name, unloading_point_country, unloading_point_zip, unloading_point_city,
+        pallet_type, quantity, loading_meters, volume, weight,
+        loading_date, delivery_date)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+""", orders_demo)
+
+# === DEMO COSTS ===
+costs_demo = [
+    # Trip 3 — Käynnissä FI→NL
+    (trip_db_ids[2], "120", "FREIGHT", 2800.0, "revenue", None),
+    (trip_db_ids[2], "200", "POLTTOAINELISÄ", 210.0, "cost", None),
+    (trip_db_ids[2], "310", "HOLLANTI + SAKSA TIEMAKSU", 95.0, "cost", None),
+
+    # Trip 4 — Toimitettu FI→DE
+    (trip_db_ids[3], "120", "FREIGHT", 3200.0, "revenue", None),
+    (trip_db_ids[3], "200", "POLTTOAINELISÄ", 280.0, "cost", None),
+    (trip_db_ids[3], "300", "SAKSAN TIEMAKSU", 85.0, "cost", None),
+    (trip_db_ids[3], "500", "LAUTTAKUSTANNUS", 340.0, "cost", None),
+    (trip_db_ids[3], "400", "TRAILERVUOKRA", 129.0, "cost", None),
+
+    # Trip 5 — Laskutettu FI→EE
+    (trip_db_ids[4], "100", "SPOT PRICE", 1800.0, "revenue", None),
+    (trip_db_ids[4], "200", "POLTTOAINELISÄ", 130.0, "cost", None),
+    (trip_db_ids[4], "500", "LAUTTAKUSTANNUS", 180.0, "cost", None),
+    (trip_db_ids[4], "400", "TRAILERVUOKRA", 84.0, "cost", None),
+
+    # Trip 6 — Vahvistettu FI→PL (vahvistuksen yhteydessä lisätty)
+    (trip_db_ids[5], "120", "FREIGHT", 2400.0, "revenue", None),
+    (trip_db_ids[5], "200", "POLTTOAINELISÄ", 195.0, "cost", None),
+    (trip_db_ids[5], "400", "TRAILERVUOKRA", 190.0, "cost", None),
+]
+
+cursor.executemany("""
+    INSERT INTO costs (trip_id, cost_code, description, amount, cost_type, custom_description)
+    VALUES (?, ?, ?, ?, ?, ?)
+""", costs_demo)
+
 conn.commit()
 conn.close()
 print("Tietokanta alustettu onnistuneesti.")
