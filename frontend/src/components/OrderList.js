@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { useToast } from '../hooks/useToast';
 
 const STATUS_COLORS = {
   "Vapaa": "#3b82f6",
   "Tripillä": "#22c55e"
 };
 
-function OrderList({ onSelect, onCreate, refreshTrigger }) {
+function OrderList({ onSelect, onCreate, refreshTrigger, onAddToTrip }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -14,6 +15,7 @@ function OrderList({ onSelect, onCreate, refreshTrigger }) {
   const [sortDir, setSortDir] = useState("desc");
   const [openMenu, setOpenMenu] = useState(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+  const toast = useToast();
 
   useEffect(() => {
     fetchOrders();
@@ -38,22 +40,51 @@ function OrderList({ onSelect, onCreate, refreshTrigger }) {
     }
   };
 
+  const handleCopy = async (id, e) => {
+    if (e) e.stopPropagation();
+    setOpenMenu(null);
+    try {
+      const res = await fetch(`http://127.0.0.1:5000/api/orders/${id}`);
+      const original = await res.json();
+      const { id: _, order_id, trip_id, status, created_at, order_reference, ...fields } = original;
+      const refRes = await fetch("http://127.0.0.1:5000/api/next-order-reference");
+      const refData = await refRes.json();
+      const copy = { ...fields, order_reference: refData.reference };
+      const postRes = await fetch("http://127.0.0.1:5000/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(copy)
+      });
+      if (postRes.ok) {
+        toast.success(`Tilaus kopioitu viitteellä ${refData.reference}`);
+        fetchOrders();
+      } else {
+        toast.error("Kopiointi epäonnistui");
+      }
+    } catch {
+      toast.error("Kopiointi epäonnistui — tarkista yhteys");
+    }
+  };
+
   const handleDelete = async (id, e) => {
-    e.stopPropagation();
+    if (e) e.stopPropagation();
     setOpenMenu(null);
     if (!window.confirm("Haluatko varmasti poistaa Orderin?")) return;
+    const order = orders.find(o => o.id === id);
+    const ref = order?.order_id || id;
     try {
       const response = await fetch(`http://127.0.0.1:5000/api/orders/${id}`, {
         method: "DELETE"
       });
       if (response.ok) {
+        toast.success(`Tilaus ${ref} poistettu`);
         fetchOrders();
       } else {
         const data = await response.json();
-        alert(data.error || "Poisto epäonnistui");
+        toast.error(data.error || "Poisto epäonnistui");
       }
-    } catch (err) {
-      alert("Virhe poistossa");
+    } catch {
+      toast.error("Poisto epäonnistui — tarkista yhteys");
     }
   };
 
@@ -295,7 +326,7 @@ function OrderList({ onSelect, onCreate, refreshTrigger }) {
             borderRadius: "8px",
             boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
             zIndex: 9999,
-            minWidth: "140px",
+            minWidth: "160px",
             overflow: "hidden"
           }}
         >
@@ -308,6 +339,24 @@ function OrderList({ onSelect, onCreate, refreshTrigger }) {
           >
             ✏️ Muokkaa
           </button>
+          <button
+            onClick={(e) => handleCopy(openMenu, e)}
+            style={{ ...menuItemStyle, color: "#93c5fd" }}
+          >
+            📋 Kopioi order
+          </button>
+          {orders.find(o => o.id === openMenu)?.status === "Vapaa" && (
+            <button
+              onClick={() => {
+                const order = orders.find(o => o.id === openMenu);
+                setOpenMenu(null);
+                onAddToTrip(order);
+              }}
+              style={{ ...menuItemStyle, color: "#22c55e" }}
+            >
+              🚚 Lisää Tripille
+            </button>
+          )}
           <button
             onClick={(e) => handleDelete(openMenu, e)}
             style={{ ...menuItemStyle, color: "#fca5a5" }}

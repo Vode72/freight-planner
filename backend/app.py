@@ -232,17 +232,74 @@ def get_trailers():
     return jsonify([dict(t) for t in trailers])
 
 
-@app.route("/api/trailers/<int:trailer_id>", methods=["PUT"])
-def update_trailer_status(trailer_id):
+@app.route("/api/trailers", methods=["POST"])
+def create_trailer():
     data = request.get_json()
+    if not data or not data.get("plate_number") or not data.get("trailer_type"):
+        return jsonify({"error": "Rekisterinumero ja tyyppi ovat pakollisia"}), 400
     conn = get_db_connection()
-    conn.execute(
-        "UPDATE trailers SET status = ? WHERE id = ?",
-        (data.get("status"), trailer_id)
-    )
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO trailers (plate_number, identifier, trailer_type, leasing_company, leasing_rate, rental_rate, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        data.get("plate_number"),
+        data.get("identifier", ""),
+        data.get("trailer_type"),
+        data.get("leasing_company", "TIP Trailer Services"),
+        float(data.get("leasing_rate", 0)),
+        float(data.get("rental_rate", 0)),
+        data.get("status", "Vapaa")
+    ))
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+    return jsonify({"message": "Traileri luotu", "id": new_id}), 201
+
+
+@app.route("/api/trailers/<int:trailer_id>", methods=["PUT"])
+def update_trailer(trailer_id):
+    conn = get_db_connection()
+    if not conn.execute("SELECT id FROM trailers WHERE id=?", (trailer_id,)).fetchone():
+        conn.close()
+        return jsonify({"error": "Traileria ei löydy"}), 404
+    data = request.get_json()
+    conn.execute("""
+        UPDATE trailers SET plate_number=?, identifier=?, trailer_type=?,
+            leasing_company=?, leasing_rate=?, rental_rate=?, status=?
+        WHERE id=?
+    """, (
+        data.get("plate_number"),
+        data.get("identifier", ""),
+        data.get("trailer_type"),
+        data.get("leasing_company", "TIP Trailer Services"),
+        float(data.get("leasing_rate", 0)),
+        float(data.get("rental_rate", 0)),
+        data.get("status", "Vapaa"),
+        trailer_id
+    ))
     conn.commit()
     conn.close()
-    return jsonify({"message": "Trailerin status päivitetty"})
+    return jsonify({"message": "Traileri päivitetty"})
+
+
+@app.route("/api/trailers/<int:trailer_id>", methods=["DELETE"])
+def delete_trailer(trailer_id):
+    conn = get_db_connection()
+    if not conn.execute("SELECT id FROM trailers WHERE id=?", (trailer_id,)).fetchone():
+        conn.close()
+        return jsonify({"error": "Traileria ei löydy"}), 404
+    active = conn.execute("""
+        SELECT COUNT(*) as c FROM trips
+        WHERE trailer_id=? AND status NOT IN ('Laskutettu')
+    """, (trailer_id,)).fetchone()["c"]
+    if active > 0:
+        conn.close()
+        return jsonify({"error": f"Trailerilla on {active} aktiivista keikkaa — poista ensin keikkalinkitykset"}), 400
+    conn.execute("DELETE FROM trailers WHERE id=?", (trailer_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Traileri poistettu"})
 
 
 # ===== CARRIERS =====
@@ -253,6 +310,74 @@ def get_carriers():
     carriers = conn.execute("SELECT * FROM carriers ORDER BY name").fetchall()
     conn.close()
     return jsonify([dict(c) for c in carriers])
+
+
+@app.route("/api/carriers", methods=["POST"])
+def create_carrier():
+    data = request.get_json()
+    if not data or not data.get("name"):
+        return jsonify({"error": "Nimi on pakollinen"}), 400
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO carriers (name, country, city, business_id, contact_person, phone)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        data.get("name"),
+        data.get("country", "FI"),
+        data.get("city", ""),
+        data.get("business_id"),
+        data.get("contact_person"),
+        data.get("phone")
+    ))
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+    return jsonify({"message": "Kuljetusyhtiö luotu", "id": new_id}), 201
+
+
+@app.route("/api/carriers/<int:carrier_id>", methods=["PUT"])
+def update_carrier(carrier_id):
+    conn = get_db_connection()
+    if not conn.execute("SELECT id FROM carriers WHERE id=?", (carrier_id,)).fetchone():
+        conn.close()
+        return jsonify({"error": "Kuljetusyhtiötä ei löydy"}), 404
+    data = request.get_json()
+    conn.execute("""
+        UPDATE carriers SET name=?, country=?, city=?, business_id=?, contact_person=?, phone=?
+        WHERE id=?
+    """, (
+        data.get("name"),
+        data.get("country", "FI"),
+        data.get("city", ""),
+        data.get("business_id"),
+        data.get("contact_person"),
+        data.get("phone"),
+        carrier_id
+    ))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Kuljetusyhtiö päivitetty"})
+
+
+@app.route("/api/carriers/<int:carrier_id>", methods=["DELETE"])
+def delete_carrier(carrier_id):
+    conn = get_db_connection()
+    if not conn.execute("SELECT id FROM carriers WHERE id=?", (carrier_id,)).fetchone():
+        conn.close()
+        return jsonify({"error": "Kuljetusyhtiötä ei löydy"}), 404
+    active = conn.execute("""
+        SELECT COUNT(*) as c FROM trips
+        WHERE carrier_id=? AND status NOT IN ('Laskutettu')
+    """, (carrier_id,)).fetchone()["c"]
+    if active > 0:
+        conn.close()
+        return jsonify({"error": f"Kuljetusyhtiöllä on {active} aktiivista keikkaa — poista ensin keikkalinkitykset"}), 400
+    conn.execute("DELETE FROM trucks WHERE carrier_id=?", (carrier_id,))
+    conn.execute("DELETE FROM carriers WHERE id=?", (carrier_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Kuljetusyhtiö poistettu"})
 
 
 # ===== TRUCKS =====
@@ -280,6 +405,60 @@ def get_trucks():
     return jsonify([dict(t) for t in trucks])
 
 
+@app.route("/api/trucks", methods=["POST"])
+def create_truck():
+    data = request.get_json()
+    if not data or not data.get("plate_number") or not data.get("carrier_id"):
+        return jsonify({"error": "Rekisterinumero ja kuljetusyhtiö ovat pakollisia"}), 400
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO trucks (plate_number, carrier_id, status) VALUES (?, ?, ?)",
+        (data.get("plate_number"), data.get("carrier_id"), data.get("status", "Vapaa"))
+    )
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+    return jsonify({"message": "Vetäjä luotu", "id": new_id}), 201
+
+
+@app.route("/api/trucks/<int:truck_id>", methods=["PUT"])
+def update_truck(truck_id):
+    conn = get_db_connection()
+    if not conn.execute("SELECT id FROM trucks WHERE id=?", (truck_id,)).fetchone():
+        conn.close()
+        return jsonify({"error": "Vetäjää ei löydy"}), 404
+    data = request.get_json()
+    conn.execute(
+        "UPDATE trucks SET plate_number=?, carrier_id=?, status=? WHERE id=?",
+        (data.get("plate_number"), data.get("carrier_id"), data.get("status", "Vapaa"), truck_id)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Vetäjä päivitetty"})
+
+
+@app.route("/api/trucks/<int:truck_id>", methods=["DELETE"])
+def delete_truck(truck_id):
+    conn = get_db_connection()
+    if not conn.execute("SELECT id FROM trucks WHERE id=?", (truck_id,)).fetchone():
+        conn.close()
+        return jsonify({"error": "Vetäjää ei löydy"}), 404
+    conn.execute("DELETE FROM trucks WHERE id=?", (truck_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Vetäjä poistettu"})
+
+@app.route("/api/route-match", methods=["GET"])
+def route_match():
+    order_country = request.args.get("order_country", "")
+    order_zip = request.args.get("order_zip", "")
+    trip_country = request.args.get("trip_country", "")
+    trip_zip = request.args.get("trip_zip", "")
+    match = get_route_match(order_country, order_zip, trip_country, trip_zip)
+    return jsonify({"match": match})
+
+
 # ===== TRIPS =====
 
 @app.route("/api/trips", methods=["GET"])
@@ -289,7 +468,10 @@ def get_trips():
         SELECT t.*,
                tr.plate_number, tr.identifier, tr.trailer_type as trailer_type_name,
                c.name as carrier_name, c.country as carrier_country,
-               COUNT(o.id) as order_count
+               COUNT(o.id) as order_count,
+               COALESCE(SUM(o.weight), 0) as total_weight,
+               COALESCE(SUM(o.loading_meters), 0) as total_loading_meters,
+               COALESCE(SUM(o.volume), 0) as total_volume
         FROM trips t
         LEFT JOIN trailers tr ON t.trailer_id = tr.id
         LEFT JOIN carriers c ON t.carrier_id = c.id
@@ -561,6 +743,59 @@ def delete_trip(trip_id):
     if is_locked(trip["status"]):
         conn.close()
         return jsonify({"error": "Laskutettu keikka on lukittu"}), 403
+
+    conn.execute("UPDATE orders SET trip_id = NULL, status = 'Vapaa' WHERE trip_id = ?", (trip_id,))
+    conn.execute("DELETE FROM costs WHERE trip_id = ?", (trip_id,))
+    conn.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Keikka poistettu"})
+
+
+def get_route_match(order_country, order_zip, trip_country, trip_zip):
+    """
+    Vertaa orderin purkupaikan ja tripin maaranpaan yhteensopivuutta.
+    Palauttaa: 'good', 'warning', tai 'bad'
+    """
+    if not order_country or not trip_country:
+        return "warning"
+    ...
+
+    # Sama maa
+    if order_country == trip_country:
+        if order_zip and trip_zip:
+            # Sama postialue (1. numero sama)
+            if order_zip[0] == trip_zip[0]:
+                return "good"
+            else:
+                return "warning"
+        return "good"
+
+    # Naapurimaat
+    NEIGHBORS = {
+        "FI": ["EE", "SE", "NO"],
+        "SE": ["NO", "DK", "FI"],
+        "NO": ["SE", "FI"],
+        "DK": ["SE", "DE"],
+        "DE": ["NL", "BE", "LU", "FR", "CH", "AT", "PL", "CZ", "DK"],
+        "NL": ["BE", "DE", "LU"],
+        "BE": ["NL", "DE", "LU", "FR"],
+        "LU": ["BE", "DE", "FR"],
+        "FR": ["BE", "LU", "DE", "CH", "IT", "ES"],
+        "PL": ["DE", "CZ", "SK", "UA", "BY", "LT"],
+        "EE": ["FI", "LV"],
+        "LV": ["EE", "LT"],
+        "LT": ["LV", "PL", "BY"],
+        "AT": ["DE", "CH", "IT", "SI", "SK", "HU", "CZ"],
+        "CH": ["DE", "AT", "FR", "IT"],
+        "IT": ["FR", "CH", "AT", "SI"],
+        "ES": ["FR", "PT"],
+    }
+
+    if trip_country in NEIGHBORS.get(order_country, []):
+        return "warning"
+
+    return "bad"
 
     conn.execute("UPDATE orders SET trip_id = NULL, status = 'Vapaa' WHERE trip_id = ?", (trip_id,))
     conn.execute("DELETE FROM costs WHERE trip_id = ?", (trip_id,))
@@ -974,6 +1209,170 @@ def delete_cost(cost_id):
     conn.commit()
     conn.close()
     return jsonify({"message": "Kulu poistettu"})
+
+
+# ===== DASHBOARD =====
+
+@app.route("/api/dashboard", methods=["GET"])
+def get_dashboard():
+    conn = get_db_connection()
+
+    trips = conn.execute("""
+        SELECT t.id, t.trip_id, t.status, t.loading_date, t.delivery_date,
+               t.first_pickup_city, t.first_pickup_country,
+               t.trip_end_city, t.trip_end_country,
+               c.name as carrier_name,
+               COUNT(DISTINCT o.id) as order_count,
+               COALESCE(SUM(CASE WHEN co.cost_type='revenue' THEN co.amount ELSE 0 END), 0) as total_revenue,
+               COALESCE(SUM(CASE WHEN co.cost_type='cost' THEN co.amount ELSE 0 END), 0) as total_costs
+        FROM trips t
+        LEFT JOIN carriers c ON t.carrier_id = c.id
+        LEFT JOIN orders o ON o.trip_id = t.id
+        LEFT JOIN costs co ON co.trip_id = t.id
+        GROUP BY t.id
+        ORDER BY t.created_at DESC
+        LIMIT 20
+    """).fetchall()
+
+    kpi = conn.execute("""
+        SELECT
+            COUNT(DISTINCT t.id) as total_trips,
+            COUNT(DISTINCT o.id) as total_orders,
+            COALESCE(SUM(CASE WHEN co.cost_type='revenue' THEN co.amount ELSE 0 END), 0) as total_revenue,
+            COALESCE(SUM(CASE WHEN co.cost_type='cost' THEN co.amount ELSE 0 END), 0) as total_costs
+        FROM trips t
+        LEFT JOIN orders o ON o.trip_id = t.id
+        LEFT JOIN costs co ON co.trip_id = t.id
+    """).fetchone()
+
+    status_counts = conn.execute("""
+        SELECT status, COUNT(*) as count FROM trips GROUP BY status
+    """).fetchall()
+
+    conn.close()
+
+    trips_list = []
+    for t in trips:
+        d = dict(t)
+        revenue = d["total_revenue"]
+        costs = d["total_costs"]
+        margin = round(revenue - costs, 2)
+        d["margin"] = margin
+        d["margin_percent"] = round(margin / revenue * 100, 2) if revenue > 0 else 0
+        d["total_revenue"] = round(revenue, 2)
+        d["total_costs"] = round(costs, 2)
+        trips_list.append(d)
+
+    kpi_dict = dict(kpi)
+    total_revenue = kpi_dict["total_revenue"]
+    total_costs = kpi_dict["total_costs"]
+    kpi_dict["margin"] = round(total_revenue - total_costs, 2)
+    kpi_dict["margin_percent"] = round(
+        (kpi_dict["margin"] / total_revenue * 100), 2
+    ) if total_revenue > 0 else 0
+
+    return jsonify({
+        "kpi": kpi_dict,
+        "trips": trips_list,
+        "status_counts": [dict(s) for s in status_counts]
+    })
+
+
+# ===== CUSTOMERS =====
+
+@app.route("/api/customers", methods=["GET"])
+def get_customers():
+    conn = get_db_connection()
+    customers = conn.execute("SELECT * FROM customers ORDER BY name").fetchall()
+    conn.close()
+    return jsonify([dict(c) for c in customers])
+
+
+@app.route("/api/customers/<int:customer_id>", methods=["GET"])
+def get_customer(customer_id):
+    conn = get_db_connection()
+    customer = conn.execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    conn.close()
+    if not customer:
+        return jsonify({"error": "Asiakasta ei löytynyt"}), 404
+    return jsonify(dict(customer))
+
+
+@app.route("/api/customers", methods=["POST"])
+def create_customer():
+    data = request.get_json()
+    if not data or not data.get("name"):
+        return jsonify({"error": "Nimi on pakollinen"}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO customers (name, business_id, address, zip, city, country, contact_person, phone, email, customer_type, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        data.get("name"),
+        data.get("business_id"),
+        data.get("address"),
+        data.get("zip"),
+        data.get("city"),
+        data.get("country", "FI"),
+        data.get("contact_person"),
+        data.get("phone"),
+        data.get("email"),
+        data.get("customer_type", "molemmat"),
+        data.get("notes"),
+    ))
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+    return jsonify({"message": "Asiakas luotu", "id": new_id}), 201
+
+
+@app.route("/api/customers/<int:customer_id>", methods=["PUT"])
+def update_customer(customer_id):
+    conn = get_db_connection()
+    customer = conn.execute("SELECT id FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    if not customer:
+        conn.close()
+        return jsonify({"error": "Asiakasta ei löytynyt"}), 404
+
+    data = request.get_json()
+    conn.execute("""
+        UPDATE customers SET
+            name=?, business_id=?, address=?, zip=?, city=?, country=?,
+            contact_person=?, phone=?, email=?, customer_type=?, notes=?
+        WHERE id=?
+    """, (
+        data.get("name"),
+        data.get("business_id"),
+        data.get("address"),
+        data.get("zip"),
+        data.get("city"),
+        data.get("country", "FI"),
+        data.get("contact_person"),
+        data.get("phone"),
+        data.get("email"),
+        data.get("customer_type", "molemmat"),
+        data.get("notes"),
+        customer_id,
+    ))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Asiakas päivitetty"})
+
+
+@app.route("/api/customers/<int:customer_id>", methods=["DELETE"])
+def delete_customer(customer_id):
+    conn = get_db_connection()
+    customer = conn.execute("SELECT id FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    if not customer:
+        conn.close()
+        return jsonify({"error": "Asiakasta ei löytynyt"}), 404
+
+    conn.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Asiakas poistettu"})
 
 
 if __name__ == "__main__":

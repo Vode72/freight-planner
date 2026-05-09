@@ -10,6 +10,7 @@ cursor.execute("DROP TABLE IF EXISTS trucks")
 cursor.execute("DROP TABLE IF EXISTS trips")
 cursor.execute("DROP TABLE IF EXISTS trailers")
 cursor.execute("DROP TABLE IF EXISTS carriers")
+cursor.execute("DROP TABLE IF EXISTS customers")
 
 # Trips taulu
 cursor.execute("""
@@ -214,6 +215,41 @@ cursor.executemany("""
     INSERT INTO trucks (plate_number, carrier_id)
     VALUES (?, ?)
 """, trucks)
+
+# Customers taulu
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS customers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    business_id TEXT,
+    address TEXT,
+    zip TEXT,
+    city TEXT,
+    country TEXT NOT NULL DEFAULT 'FI',
+    contact_person TEXT,
+    phone TEXT,
+    email TEXT,
+    customer_type TEXT DEFAULT 'molemmat',
+    notes TEXT
+)
+""")
+
+# Lisätään asiakkaat
+customers = [
+    ("Kesko Logistics Oy", "1234567-8", "Satamakatu 5", "00160", "Helsinki", "FI", "Antti Leinonen", "+358 40 111 2222", "antti.leinonen@kesko.fi", "consignee", None),
+    ("Rautakesko Oy", "2345678-9", "Kehräämöntie 3", "04200", "Kerava", "FI", "Satu Niemi", "+358 40 222 3333", "satu.niemi@rautakesko.fi", "molemmat", None),
+    ("S-ryhmä Logistiikka", "3456789-0", "Fleminginkatu 34", "00510", "Helsinki", "FI", "Ville Hakala", "+358 40 333 4444", "ville.hakala@s-ryhma.fi", "consignee", None),
+    ("Cargotec Finland Oy", "4567890-1", "Porkkalankatu 5", "00180", "Helsinki", "FI", "Laura Heikkinen", "+358 40 444 5555", "laura.heikkinen@cargotec.com", "consignor", None),
+    ("Wihuri Oy", "5678901-2", "Sörnäistenkatu 6", "00580", "Helsinki", "FI", "Mikko Järvinen", "+358 40 555 6666", "mikko.jarvinen@wihuri.fi", "molemmat", None),
+    ("Konecranes Oyj", "6789012-3", "Koneenkatu 8", "05830", "Hyvinkää", "FI", "Erika Lund", "+358 40 666 7777", "erika.lund@konecranes.com", "consignor", None),
+    ("Meyer Turku Oy", "7890123-4", "Telakkakatu 1", "20810", "Turku", "FI", "Timo Rantanen", "+358 40 777 8888", "timo.rantanen@meyerturku.fi", "molemmat", None),
+    ("UPM-Kymmene Oyj", "8901234-5", "Alvar Aallon katu 1", "00100", "Helsinki", "FI", "Minna Saarinen", "+358 40 888 9999", "minna.saarinen@upm.com", "consignor", None),
+]
+
+cursor.executemany("""
+    INSERT INTO customers (name, business_id, address, zip, city, country, contact_person, phone, email, customer_type, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+""", customers)
 
 conn.commit()
 conn.close()

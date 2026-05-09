@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import DatePickerField from "./DatePickerField";
+import { useToast } from '../hooks/useToast';
 
 function TripForm({ tripId, onSave, onCancel }) {
   const [form, setForm] = useState({
@@ -38,6 +39,7 @@ function TripForm({ tripId, onSave, onCancel }) {
   const [trucks, setTrucks] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const toast = useToast();
 
   useEffect(() => {
     fetch("http://127.0.0.1:5000/api/carriers")
@@ -84,7 +86,9 @@ function TripForm({ tripId, onSave, onCancel }) {
     }));
   };
 
-  const handleSubmit = async () => {
+  // ── KORJATTU handleSubmit ────────────────────────────────────────────────
+  const handleSubmit = async (e) => {
+    e.preventDefault();
     setSaving(true);
     setError("");
     try {
@@ -92,28 +96,25 @@ function TripForm({ tripId, onSave, onCancel }) {
         ? `http://127.0.0.1:5000/api/trips/${tripId}`
         : "http://127.0.0.1:5000/api/trips";
       const method = tripId ? "PUT" : "POST";
-      const body = {
-        ...form,
-        carrier_id: form.carrier_id ? parseInt(form.carrier_id) : null,
-        trailer_id: form.trailer_id ? parseInt(form.trailer_id) : null
-      };
-      const response = await fetch(url, {
+
+      const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
+        body: JSON.stringify(form),
       });
-      const data = await response.json();
-      if (response.ok) {
-        onSave(data.id || tripId);
-      } else {
-        setError(data.error || "Tallennus epäonnistui");
-      }
-    } catch (err) {
-      setError("Palvelinyhteys epäonnistui");
+
+      if (!res.ok) throw new Error();
+
+      toast.success(tripId ? "Kuljetus päivitetty" : "Kuljetus luotu");
+      onSave();
+    } catch {
+      toast.error("Tallennus epäonnistui — tarkista yhteys");
+      setError("Tallennus epäonnistui.");
     } finally {
       setSaving(false);
     }
   };
+  // ────────────────────────────────────────────────────────────────────────
 
   // ===== TYYLIT =====
   const sectionStyle = {
@@ -309,7 +310,7 @@ function TripForm({ tripId, onSave, onCancel }) {
                 </option>
               ))}
             </select>
-          </div>          
+          </div>
           <div>
             <label style={labelStyle}>Vetoauton rekkari</label>
             <select
@@ -331,34 +332,34 @@ function TripForm({ tripId, onSave, onCancel }) {
       {/* AIKAIKKUNAT */}
       <div style={sectionStyle}>
         <h3 style={sectionTitle}>🕐 Aikaikkunat</h3>
-      <div style={{ marginBottom: "12px", color: "#cbd5e1", fontSize: "13px" }}>
-        Lastaus
-      </div>
-      <div style={grid3}>
-        <DatePickerField
-          label="Päivä"
-          value={form.loading_date}
-          onChange={(val) => handleChange("loading_date", val)}
-          labelStyle={labelStyle}
-          inputStyle={inputStyle}
-        />
-        {inputField("loading_time_start", "Klo alku", "time")}
-        {inputField("loading_time_end", "Klo loppu", "time")}
-      </div>
-      <div style={{ marginTop: "16px", marginBottom: "12px", color: "#cbd5e1", fontSize: "13px" }}>
-        Toimitus
-      </div>
-      <div style={grid3}>
-        <DatePickerField
-          label="Päivä"
-          value={form.delivery_date}
-          onChange={(val) => handleChange("delivery_date", val)}
-          labelStyle={labelStyle}
-          inputStyle={inputStyle}
-        />
-        {inputField("delivery_time_start", "Klo alku", "time")}
-        {inputField("delivery_time_end", "Klo loppu", "time")}
-      </div>
+        <div style={{ marginBottom: "12px", color: "#cbd5e1", fontSize: "13px" }}>
+          Lastaus
+        </div>
+        <div style={grid3}>
+          <DatePickerField
+            label="Päivä"
+            value={form.loading_date}
+            onChange={(val) => handleChange("loading_date", val)}
+            labelStyle={labelStyle}
+            inputStyle={inputStyle}
+          />
+          {inputField("loading_time_start", "Klo alku", "time")}
+          {inputField("loading_time_end", "Klo loppu", "time")}
+        </div>
+        <div style={{ marginTop: "16px", marginBottom: "12px", color: "#cbd5e1", fontSize: "13px" }}>
+          Toimitus
+        </div>
+        <div style={grid3}>
+          <DatePickerField
+            label="Päivä"
+            value={form.delivery_date}
+            onChange={(val) => handleChange("delivery_date", val)}
+            labelStyle={labelStyle}
+            inputStyle={inputStyle}
+          />
+          {inputField("delivery_time_start", "Klo alku", "time")}
+          {inputField("delivery_time_end", "Klo loppu", "time")}
+        </div>
         <div style={{ marginTop: "12px" }}>
           {checkboxRow("fixed_delivery_date", "Kiinteä toimituspäivä")}
         </div>
@@ -391,11 +392,7 @@ function TripForm({ tripId, onSave, onCancel }) {
       {/* LISÄPALVELUT */}
       <div style={sectionStyle}>
         <h3 style={sectionTitle}>✅ Lisäpalvelut</h3>
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr 1fr",
-          gap: "12px"
-        }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
           {checkboxRow("adr", "ADR (vaarallinen aine)")}
           {checkboxRow("tail_lift", "Takalaitanostin")}
           {checkboxRow("temperature_controlled", "Lämpösäädelty")}

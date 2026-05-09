@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useToast } from '../hooks/useToast';
 
 const STATUS_COLORS = {
   "Suunniteltu": "#3b82f6",
@@ -119,12 +120,23 @@ function StatusChain({ currentStatus }) {
 }
 
 function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
+  // ── hooks AINA komponentin sisällä ──────────────────────────────────────
+  const toast = useToast();
+
   const [trip, setTrip] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("orders");
   const [freeOrders, setFreeOrders] = useState([]);
+  const [freeOrderSearch, setFreeOrderSearch] = useState("");
+  const [freeOrderMatches, setFreeOrderMatches] = useState({});
   const [showAddOrder, setShowAddOrder] = useState(false);
-  const [newCost, setNewCost] = useState({ cost_code: "200", description: "POLTTOAINELISÄ", amount: "", cost_type: "cost", custom_description: "" });
+  const [newCost, setNewCost] = useState({
+    cost_code: "200",
+    description: "POLTTOAINELISÄ",
+    amount: "",
+    cost_type: "cost",
+    custom_description: ""
+  });
   const [showAddCost, setShowAddCost] = useState(false);
   const [invoiceConfirm, setInvoiceConfirm] = useState(false);
   const [statusLoading, setStatusLoading] = useState(false);
@@ -150,6 +162,22 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
     const response = await fetch("http://127.0.0.1:5000/api/orders?status=Vapaa");
     const data = await response.json();
     setFreeOrders(data);
+    setFreeOrderSearch("");
+
+    if (!trip) return;
+    const matches = {};
+    await Promise.all(data.map(async (o) => {
+      const params = new URLSearchParams({
+        order_country: o.unloading_point_country || "",
+        order_zip: o.unloading_point_zip || "",
+        trip_country: trip.trip_end_country || "",
+        trip_zip: trip.trip_end_zip || ""
+      });
+      const res = await fetch(`http://127.0.0.1:5000/api/route-match?${params}`);
+      const d = await res.json();
+      matches[o.id] = d.match;
+    }));
+    setFreeOrderMatches(matches);
   };
 
   const handleAddOrder = async (orderId) => {
@@ -159,11 +187,12 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
     );
     const data = await response.json();
     if (response.ok) {
+      toast.success(`Tilaus lisätty kuljetukselle`);
       fetchTrip();
       fetchFreeOrders();
       if (triggerRefresh) triggerRefresh();
     } else {
-      alert(data.warnings ? data.warnings.join("\n") : data.error || "Virhe");
+      toast.error(data.warnings ? data.warnings.join(" ") : data.error || "Lisäys epäonnistui");
     }
   };
 
@@ -174,11 +203,15 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
       { method: "DELETE" }
     );
     if (response.ok) {
+      toast.success("Tilaus poistettu keikalta");
       fetchTrip();
       if (triggerRefresh) triggerRefresh();
+    } else {
+      toast.error("Poisto epäonnistui");
     }
   };
 
+  // ── Statuksen vaihto ────────────────────────────────────────────────────
   const handleStatusChange = async (newStatus) => {
     setStatusLoading(true);
     try {
@@ -191,65 +224,101 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
         }
       );
       if (response.ok) {
+        toast.success(`Status päivitetty: ${newStatus}`);
         fetchTrip();
         if (triggerRefresh) triggerRefresh();
       } else {
         const data = await response.json();
-        alert(data.error || "Virhe");
+        toast.error(data.error || "Statuksen päivitys epäonnistui");
       }
+    } catch {
+      toast.error("Statuksen päivitys epäonnistui");
     } finally {
       setStatusLoading(false);
     }
   };
 
+  // ── Laskuvahvistus ──────────────────────────────────────────────────────
   const handleConfirmInvoice = async () => {
-    const response = await fetch(
-      `http://127.0.0.1:5000/api/trips/${tripId}/confirm-invoice`,
-      { method: "POST" }
-    );
-    if (response.ok) {
-      setInvoiceConfirm(false);
-      fetchTrip();
-      if (triggerRefresh) triggerRefresh();
-    } else {
-      const data = await response.json();
-      alert(data.error || "Virhe");
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:5000/api/trips/${tripId}/status`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "Laskutettu" })
+        }
+      );
+      if (response.ok) {
+        toast.success("Lasku vahvistettu — kulut lukittu ✓");
+        setInvoiceConfirm(false);
+        fetchTrip();
+        if (triggerRefresh) triggerRefresh();
+      } else {
+        const data = await response.json();
+        toast.error(data.error || "Laskuvahvistus epäonnistui");
+      }
+    } catch {
+      toast.error("Laskuvahvistus epäonnistui");
     }
   };
 
+  // ── Kulun lisäys ────────────────────────────────────────────────────────
   const handleAddCost = async () => {
-    if (!newCost.amount) return alert("Syötä summa");
     const payload = {
       cost_code: newCost.cost_code,
-      description: newCost.cost_code === "820" ? newCost.custom_description : newCost.description,
+      description: newCost.cost_code === "820"
+        ? (newCost.custom_description || "MUU KULU")
+        : newCost.description,
       amount: parseFloat(newCost.amount),
       cost_type: newCost.cost_type,
       custom_description: newCost.custom_description
     };
-    const response = await fetch(
-      `http://127.0.0.1:5000/api/trips/${tripId}/costs`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:5000/api/trips/${tripId}/costs`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        }
+      );
+      if (response.ok) {
+        toast.success(`Kulurivi ${newCost.cost_code} lisätty`);
+        setNewCost({
+          cost_code: "200",
+          description: "POLTTOAINELISÄ",
+          amount: "",
+          cost_type: "cost",
+          custom_description: ""
+        });
+        setShowAddCost(false);
+        fetchTrip();
+      } else {
+        const data = await response.json();
+        toast.error(data.error || "Kulun tallennus epäonnistui");
       }
-    );
-    if (response.ok) {
-      setNewCost({ cost_code: "200", description: "POLTTOAINELISÄ", amount: "", cost_type: "cost", custom_description: "" });
-      setShowAddCost(false);
-      fetchTrip();
-    } else {
-      const data = await response.json();
-      alert(data.error || "Virhe");
+    } catch {
+      toast.error("Kulun tallennus epäonnistui");
     }
   };
 
   const handleDeleteCost = async (costId) => {
     if (!window.confirm("Poistetaanko kulu?")) return;
-    const response = await fetch(`http://127.0.0.1:5000/api/costs/${costId}`, {
-      method: "DELETE"
-    });
-    if (response.ok) fetchTrip();
+    try {
+      const response = await fetch(`http://127.0.0.1:5000/api/costs/${costId}`, {
+        method: "DELETE"
+      });
+      if (response.ok) {
+        toast.success("Kulurivi poistettu");
+        fetchTrip();
+      } else {
+        toast.error("Poisto epäonnistui");
+      }
+    } catch {
+      toast.error("Poisto epäonnistui");
+    }
   };
 
   const handleCostCodeChange = (code) => {
@@ -329,7 +398,6 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
         padding: "24px",
         marginBottom: "20px"
       }}>
-        {/* Yläosa: Trip ID + Status + napit */}
         <div style={{
           display: "flex",
           justifyContent: "space-between",
@@ -360,7 +428,6 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
             </div>
           </div>
 
-          {/* Toimintonapit */}
           <div style={{ display: "flex", gap: "8px" }}>
             {!isLocked && (
               <button
@@ -553,68 +620,111 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
               )}
             </div>
 
-            {/* Vapaat orderit valintaan */}
-            {showAddOrder && (
-              <div style={{
-                background: "#0f172a",
-                border: "1px solid #334155",
-                borderRadius: "8px",
-                padding: "16px",
-                marginBottom: "16px"
-              }}>
+            {showAddOrder && (() => {
+              const MATCH_CONF = {
+                good:    { icon: "✅", color: "#22c55e", border: "rgba(34,197,94,0.25)" },
+                warning: { icon: "⚠️", color: "#eab308", border: "rgba(234,179,8,0.25)" },
+                bad:     { icon: "❌", color: "#ef4444", border: "rgba(239,68,68,0.25)" }
+              };
+              const q = freeOrderSearch.toLowerCase();
+              const visible = freeOrders
+                .filter(o =>
+                  !q ||
+                  (o.order_id || "").toLowerCase().includes(q) ||
+                  (o.consignor_name || "").toLowerCase().includes(q) ||
+                  (o.consignee_name || "").toLowerCase().includes(q) ||
+                  (o.goods_description || "").toLowerCase().includes(q)
+                )
+                .sort((a, b) => {
+                  const ord = { good: 0, warning: 1, bad: 2 };
+                  return (ord[freeOrderMatches[a.id]] ?? 1) - (ord[freeOrderMatches[b.id]] ?? 1);
+                });
+              return (
                 <div style={{
-                  color: "#94a3b8",
-                  fontSize: "12px",
-                  marginBottom: "12px",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.5px"
+                  background: "#0f172a",
+                  border: "1px solid #334155",
+                  borderRadius: "8px",
+                  padding: "16px",
+                  marginBottom: "16px"
                 }}>
-                  Vapaat Orderit — klikkaa lisätäksesi
-                </div>
-                {freeOrders.length === 0 ? (
-                  <div style={{ color: "#64748b", fontSize: "13px" }}>
-                    Ei vapaita ordereita. Luo uusia Orderit-sivulta.
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                    <div style={{ color: "#94a3b8", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                      Vapaat Orderit — klikkaa lisätäksesi
+                    </div>
+                    <div style={{ color: "#64748b", fontSize: "11px" }}>
+                      ✅ sopii · ⚠️ tarkista · ❌ eri suunta
+                    </div>
                   </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {freeOrders.map(o => (
-                      <div
-                        key={o.id}
-                        onClick={() => handleAddOrder(o.id)}
-                        style={{
-                          background: "#1e293b",
-                          border: "1px solid #334155",
-                          borderRadius: "6px",
-                          padding: "12px 14px",
-                          cursor: "pointer",
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          transition: "border-color 0.15s"
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.borderColor = "#f97316"}
-                        onMouseLeave={(e) => e.currentTarget.style.borderColor = "#334155"}
-                      >
-                        <div>
-                          <span style={{ color: "#f97316", fontWeight: "600", marginRight: "10px" }}>
-                            {o.order_id}
-                          </span>
-                          <span style={{ color: "#cbd5e1", fontSize: "13px" }}>
-                            {o.consignor_name || "—"} → {o.consignee_name || "—"}
-                          </span>
-                          <div style={{ color: "#64748b", fontSize: "12px", marginTop: "2px" }}>
-                            {o.goods_description || "—"} · {o.weight} kg · {o.loading_meters} lm · {o.quantity} × {o.pallet_type}
+                  <input
+                    type="text"
+                    placeholder="🔍 Hae ordereista..."
+                    value={freeOrderSearch}
+                    onChange={e => setFreeOrderSearch(e.target.value)}
+                    style={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      padding: "7px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #334155",
+                      background: "#1e293b",
+                      color: "#f1f5f9",
+                      fontSize: "13px",
+                      outline: "none",
+                      marginBottom: "12px"
+                    }}
+                  />
+                  {freeOrders.length === 0 ? (
+                    <div style={{ color: "#64748b", fontSize: "13px" }}>
+                      Ei vapaita ordereita. Luo uusia Orderit-sivulta.
+                    </div>
+                  ) : visible.length === 0 ? (
+                    <div style={{ color: "#64748b", fontSize: "13px" }}>Ei hakuosumia.</div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "320px", overflowY: "auto" }}>
+                      {visible.map(o => {
+                        const match = freeOrderMatches[o.id] || "warning";
+                        const mc = MATCH_CONF[match];
+                        return (
+                          <div
+                            key={o.id}
+                            onClick={() => handleAddOrder(o.id)}
+                            style={{
+                              background: "#1e293b",
+                              border: `1px solid ${mc.border}`,
+                              borderRadius: "6px",
+                              padding: "10px 14px",
+                              cursor: "pointer",
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              transition: "border-color 0.15s"
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.borderColor = mc.color}
+                            onMouseLeave={e => e.currentTarget.style.borderColor = mc.border}
+                          >
+                            <div>
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "2px" }}>
+                                <span style={{ color: "#f97316", fontWeight: "600" }}>{o.order_id}</span>
+                                <span style={{ fontSize: "13px" }}>{mc.icon}</span>
+                                <span style={{ color: "#cbd5e1", fontSize: "13px" }}>
+                                  {o.consignor_name || "—"} → {o.consignee_name || "—"}
+                                </span>
+                              </div>
+                              <div style={{ color: "#64748b", fontSize: "12px" }}>
+                                {o.unloading_point_city ? `Purku: ${o.unloading_point_city} (${o.unloading_point_country}) · ` : ""}
+                                {o.goods_description || "—"} · {o.weight} kg · {o.loading_meters} lm
+                              </div>
+                            </div>
+                            <span style={{ color: mc.color, fontSize: "18px", marginLeft: "12px" }}>+</span>
                           </div>
-                        </div>
-                        <span style={{ color: "#22c55e", fontSize: "18px" }}>+</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
-            {/* Yhdistetyt orderit */}
             {trip.orders?.length === 0 ? (
               <div style={{
                 padding: "32px",
@@ -692,7 +802,7 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
         {/* ===== KALUSTO & REITTI ===== */}
         {activeTab === "cargo" && (
           <div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px" }}>
               <div style={sectionStyle}>
                 <div style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>
                   Kuljetusyhtiö
@@ -717,30 +827,20 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
                   {trip.truck_plate ? ` · Vetäjä: ${trip.truck_plate}` : ""}
                 </div>
               </div>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px", marginTop: "16px" }}>
               <div style={sectionStyle}>
                 <div style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>
-                  1st Pickup
+                  Reitti
                 </div>
-                <div style={{ color: "#f1f5f9" }}>
+                <div style={{ color: "#f1f5f9", fontSize: "14px", fontWeight: "600" }}>
                   {trip.first_pickup_country} {trip.first_pickup_zip} {trip.first_pickup_city || "—"}
                 </div>
-              </div>
-              <div style={sectionStyle}>
-                <div style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>
-                  Trip End
-                </div>
-                <div style={{ color: "#f1f5f9" }}>
+                <div style={{ color: "#475569", fontSize: "13px", margin: "4px 0" }}>↓</div>
+                <div style={{ color: "#f1f5f9", fontSize: "14px", fontWeight: "600" }}>
                   {trip.trip_end_country} {trip.trip_end_zip} {trip.trip_end_city || "—"}
                 </div>
-              </div>
-              <div style={sectionStyle}>
-                <div style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>
-                  Kuljetustyyppi
+                <div style={{ color: "#64748b", fontSize: "12px", marginTop: "6px" }}>
+                  {trip.transport_type || "—"}
                 </div>
-                <div style={{ color: "#f1f5f9" }}>{trip.transport_type || "—"}</div>
               </div>
             </div>
 
@@ -755,7 +855,7 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
         {/* ===== AIKATAULUT ===== */}
         {activeTab === "schedule" && (
           <div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: trip.ferry_route ? "1fr 1fr 1fr" : "1fr 1fr", gap: "16px" }}>
               <div style={sectionStyle}>
                 <div style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>
                   🔼 Lastaus
@@ -787,22 +887,21 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
                     : trip.delivery_time_start || ""}
                 </div>
               </div>
+              {trip.ferry_route && (
+                <div style={sectionStyle}>
+                  <div style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>
+                    ⛴️ Lauttayhteys
+                  </div>
+                  <div style={{ color: "#f1f5f9", fontSize: "15px", fontWeight: "600" }}>
+                    {trip.ferry_route}
+                  </div>
+                  <div style={{ color: "#94a3b8", fontSize: "13px", marginTop: "6px" }}>
+                    {trip.ferry_departure && <div>Lähtö: {trip.ferry_departure}</div>}
+                    {trip.ferry_arrival && <div>Saapuminen: {trip.ferry_arrival}</div>}
+                  </div>
+                </div>
+              )}
             </div>
-
-            {trip.ferry_route && (
-              <div style={{ ...sectionStyle, marginTop: "16px" }}>
-                <div style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>
-                  ⛴️ Lauttayhteys
-                </div>
-                <div style={{ color: "#f1f5f9", fontSize: "15px", fontWeight: "600" }}>
-                  {trip.ferry_route}
-                </div>
-                <div style={{ color: "#94a3b8", fontSize: "13px", marginTop: "6px", display: "flex", gap: "24px" }}>
-                  {trip.ferry_departure && <span>Lähtö: {trip.ferry_departure}</span>}
-                  {trip.ferry_arrival && <span>Saapuminen: {trip.ferry_arrival}</span>}
-                </div>
-              </div>
-            )}
 
             {trip.loading_instructions && (
               <div style={{ ...sectionStyle, marginTop: "16px" }}>
@@ -820,7 +919,6 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
         {/* ===== KUSTANNUKSET ===== */}
         {activeTab === "costs" && (
           <div>
-            {/* Yhteenveto */}
             <div style={{
               display: "grid",
               gridTemplateColumns: "1fr 1fr 1fr",

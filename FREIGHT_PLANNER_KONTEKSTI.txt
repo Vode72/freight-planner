@@ -1,0 +1,198 @@
+FREIGHT PLANNER — PROJEKTIN KONTEKSTI VS CODE CLAUDELLE
+Päivitetty: 09.05.2026
+============================================================
+
+ROOLI:
+Senior Full Stack Developer — React + Python Flask + SQLite
+
+PROJEKTIN KUVAUS:
+Freight Planner on TMS-tyylinen kuljetustenhallintatyökalu.
+Kaikki data on keksittyä demodataa — ei oikeita asiakasnimiä, rekkareita tai työdataa.
+
+TEKNINEN STACK:
+- Frontend: React 18, JavaScript, inline CSS
+- Teema: tumma #0f172a, oranssi aksentti #f97316
+- Backend: Python Flask, SQLite (freight.db)
+- REST API: http://127.0.0.1:5000
+- Frontend: http://localhost:3000
+- GitHub: github.com/Vode72/freight-planner
+- Demo: demo / freight2024
+
+============================================================
+TIETOKANTA — TAULUT
+============================================================
+
+trips:
+  trip_id (TRP-2026-001), status, reitti (first_pickup / trip_end),
+  transport_type, carrier_id, trailer_id, trailer_type, truck_plate,
+  loading_date/time, delivery_date/time, fixed_delivery_date,
+  ferry_route, ferry_departure, ferry_arrival,
+  adr, tail_lift, temperature_controlled,
+  loading_instructions, notes
+
+orders:
+  order_id (ORD-2026-001), trip_id, status (Vapaa/Tripillä),
+  order_reference (HEL-2026-001), pickup_reference, goods_description, incoterms,
+  consignor_name/address/country, consignee_name/address/country,
+  loading_point (name/country/zip/city), unloading_point (name/country/zip/city),
+  pallet_type, quantity, pallet_width/length/height,
+  loading_meters, volume, weight,
+  stackable, adr, tail_lift, insured, high_value,
+  pre_advise, time_slot_loading, time_slot_delivery,
+  min_temperature, max_temperature, temperature_monitoring, required_compartment,
+  loading_instructions, loading_date/time, delivery_date/time
+
+costs:
+  trip_id, cost_code, description, amount, cost_type (cost/revenue), custom_description
+
+trailers: (12 kpl TIP Trailer Services)
+  plate_number, identifier, trailer_type, leasing_rate, rental_rate, status
+  Tyypit: Umpikaappi (42/65€), Sivuaukeava (45/70€),
+          Umpikaappi 2-koneinen (43/67€), Pressutrailer (35/54€), Megatrailer (38/59€)
+
+carriers: (6 kuljetusyhtiötä — 3 FI, 3 EU)
+  name, country, city, business_id, contact_person, phone
+
+trucks: (12 vetäjää — 2 per yhtiö)
+  plate_number, carrier_id, status
+  Tunnukset: NRF-001/002, BLR-001/002, PHK-001/002,
+             ETR-001/002, CTC-001/002, SCL-001/002
+
+customers: ✅ VALMIS
+  name, address, country, zip, city,
+  contact_person, phone, email,
+  customer_type (consignor/consignee/both), notes
+  Demo-asiakkaat: Nordic Demo Plastics Oy, Baltic Demo Foods Oy,
+                  Demo Retail Finland Oy, Euro Demo GmbH, Continental Demo BV
+
+============================================================
+VALMIIT KOMPONENTIT
+============================================================
+
+Login.js          — kirjautuminen (demo/freight2024)
+App.js            — sidebar-layout, reititys
+                    ✅ Asiakkaat-linkki + reititys
+                    ✅ Hallinta-osio: 🏢 Kuljetusyhtiöt + 🚛 Trailerit
+Dashboard.js      — ✅ sidebarin ensimmäinen (📊):
+                    5 KPI-korttia, status-jako, keikkataulukko kateprosentteineen
+TripList.js       — datataulukko, haku, sorttaus, ⋮-menu
+TripDetail.js     — header + statusketju + kapasiteettipalkit +
+                    4 välilehteä + laskuvahvistusmodaali
+                    ✅ Vapaat orderit: hakukenttä, reittimatch, automaattinen järjestys
+TripForm.js       — Trip-luonti/muokkaus, kalenteri, pudotusvalikot
+OrderList.js      — datataulukko, haku, sorttaus, ⋮-menu
+                    ✅ "📋 Kopioi order"
+OrderForm.js      — Order-luonti/muokkaus
+                    ✅ consignor/consignee autocomplete + automaattinen osoitetäyttö
+CostCalculator.js — tarjous/katelaskin
+AddToTripModal.js — ✅ kapasiteettipalkit oikein, reittimatch ✅⚠️❌
+DatePickerField.js— react-datepicker suomeksi
+ToastContext.js + Toast.js + useToast.js — ✅
+CustomerList.js   — ✅ haku, sorttaus, customer_type badge värikoodattu
+CustomerForm.js   — ✅ customer_type dropdown
+CarrierList.js    — ✅ UUSI — kuljetusyhtiölista haulla
+                    rivi aukeaa → näyttää vetäjät inlinenä
+                    vetäjän lisäys, statuksen muutos, poisto suoraan listasta
+CarrierForm.js    — ✅ UUSI — kuljetusyhtiön luonti/muokkaus
+TrailerList.js    — ✅ UUSI — trailerilista tyyppisuodattimella, haulla, sorttauksella
+                    näyttää leasing/vuokrahinnat
+TrailerForm.js    — ✅ UUSI — trailerin luonti/muokkaus
+                    muistutus automaattisesta trailervuokralaskennasta
+
+============================================================
+VALMIIT API-ENDPOINTIT
+============================================================
+
+Auth:       POST /api/login
+Reference:  GET /api/trailer-types, /api/trailer-specs, /api/incoterms
+            GET /api/transport-types, /api/statuses, /api/ferry-routes
+            GET /api/cost-codes, /api/pallet-types, /api/next-order-reference
+Trailers:   GET /api/trailers
+            ✅ POST /api/trailers
+            ✅ PUT /api/trailers/:id (kaikki kentät)
+            ✅ DELETE /api/trailers/:id (tarkistaa aktiiviset keikkalinkit)
+Carriers:   GET /api/carriers
+            ✅ POST /api/carriers
+            ✅ PUT /api/carriers/:id
+            ✅ DELETE /api/carriers/:id (tarkistaa aktiiviset keikkalinkit)
+Trucks:     GET /api/trucks?carrier_id=
+            ✅ POST /api/trucks
+            ✅ PUT /api/trucks/:id
+            ✅ DELETE /api/trucks/:id (tarkistaa aktiiviset keikkalinkit)
+Trips:      GET/POST /api/trips, GET/PUT/DELETE /api/trips/:id
+            ✅ GET palauttaa total_weight, total_loading_meters, total_volume
+            PUT /api/trips/:id/status, POST /api/trips/:id/confirm-invoice
+Orders:     GET/POST /api/orders, GET/PUT/DELETE /api/orders/:id
+            POST/DELETE /api/trips/:id/orders/:id
+Costs:      GET/POST /api/trips/:id/costs, PUT/DELETE /api/costs/:id
+Route:      GET /api/route-match
+Customers:  GET/POST /api/customers, GET/PUT/DELETE /api/customers/:id
+
+============================================================
+VALMIIT KOKONAISUUDET
+============================================================
+
+✅ 1. Toast-ilmoitukset
+✅ 2. Asiakasrekisteri (+ customer_type kaikkialla)
+✅ 3. Order-to-Trip flow viimeistely
+✅ 5. Dashboard + KPI
+✅ 7. Orderin kopiointi
+✅ 8. Hallintanäkymät (CarrierList+Form, TrailerList+Form, trucks inlinenä)
+
+============================================================
+BISNESLOGIIKKA
+============================================================
+
+STATUS-KETJU: Suunniteltu → Vahvistettu → Käynnissä → Toimitettu → Laskutettu
+- Laskutettu = lukittu, ei muutoksia
+- Vahvistus → automaattinen trailervuokra (400 osto + 401 myynti)
+
+LAUTTAREITIT:
+- Helsinki - Travemünde (Finnlines) 1050€
+- Hanko - Lübeck (Transfennica) 1010€
+- Hanko - Rostock (Finnlines) 750€
+- Kotka - Antwerpen (Transfennica) 1800€
+
+KULUKOODIT: 100(SPOT), 120(FREIGHT), 200(POLTTOAINELISÄ),
+210(KOTIMAAN AJO), 220(MANTEREEN AJO), 300(SAKSAN TIEMAKSU),
+310(HOLLANTI+SAKSA), 400(TRAILERVUOKRA osto), 401(myynti),
+410(TANKKAUS), 500(LAUTTA), 510(SATAMA), 600(ADR), 610(LÄMPÖTILA),
+700(KÄSITTELY), 799(MUUT), 800(ODOTUS), 810(LISÄKÄSITTELY),
+820(MUU), 830(YLIKÄYTTÖ osto), 831(myynti)
+
+KAPASITEETTITYYPIT:
+- Thermo: Umpikaappi, Sivuaukeava, Umpikaappi 2-koneinen
+- Standard: Pressutrailer, Megatrailer
+
+REITTIMATCH-LOGIIKKA: good ✅ / warning ⚠️ / bad ❌
+- Sama maa + sama postialue → good
+- Sama maa eri alue → warning
+- Naapurimaa → warning
+- Muu → bad
+
+============================================================
+TULEVA KEHITYS
+============================================================
+
+4.  Kompakti layout (TripDetail 3-palsta, OrderForm 2-3 palsta)
+6.  CMR + Transport Order + PDF-lasku
+9.  Seisontapäivät + älykäs trailerisuositus
+10. Multiuser + roolit
+11. Sisäiset hälytykset
+12. Poikkeamanhallinta
+13. Hinnoittelumoottori
+14. Tender Management
+15. Sähköposti (Transport Order PDF)
+16. POD
+17. Dokumenttien tallennus + tulliasiakirjat
+18. Reittioptimointi
+19. Karttaseuranta
+20. Ajo/lepoaikalaskuri (EU 561/2006)
+
+--- MYÖHEMMIN ---
+Traffic Coordinator Planner — oma välilehti Freight Plannerissa
+  Konseptit: Daily Traffic Plan, Est. Disc. Time, Closing Time,
+             Vessel ETA, Import/Export-flow, riskilogiikka
+             (ajoaika, aikaikkunat, closing-riski)
+  Data: suoraan olemassa olevasta backendistä
+  (orderit, trailerit, vetäjät, trippit)

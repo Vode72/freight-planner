@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import DatePickerField from "./DatePickerField";
+import { useToast } from '../hooks/useToast';
 
 const PALLET_PRESETS = {
   "FIN-lava": { width: 1.0, length: 1.2 },
@@ -56,37 +57,40 @@ function OrderForm({ orderId, onSave, onCancel }) {
     delivery_time_end: ""
   });
 
+  const toast = useToast();
   const [incoterms, setIncoterms] = useState([]);
   const [palletTypes, setPalletTypes] = useState([]);
+  const [customers, setCustomers] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [activeDropdown, setActiveDropdown] = useState(null);
 
   useEffect(() => {
-      fetch("http://127.0.0.1:5000/api/incoterms")
-        .then(r => r.json()).then(setIncoterms);
-      fetch("http://127.0.0.1:5000/api/pallet-types")
-        .then(r => r.json()).then(setPalletTypes);
+    fetch("http://127.0.0.1:5000/api/incoterms")
+      .then(r => r.json()).then(setIncoterms);
+    fetch("http://127.0.0.1:5000/api/pallet-types")
+      .then(r => r.json()).then(setPalletTypes);
+    fetch("http://127.0.0.1:5000/api/customers")
+      .then(r => r.json()).then(setCustomers);
 
-      if (orderId) {
-        // Muokkaus — haetaan olemassa oleva order
-        fetch(`http://127.0.0.1:5000/api/orders/${orderId}`)
-          .then(r => r.json())
-          .then(data => {
-            const cleaned = {};
-            Object.keys(data).forEach(k => {
-              cleaned[k] = data[k] === null ? "" : data[k];
-            });
-            setForm(prev => ({ ...prev, ...cleaned }));
+    if (orderId) {
+      fetch(`http://127.0.0.1:5000/api/orders/${orderId}`)
+        .then(r => r.json())
+        .then(data => {
+          const cleaned = {};
+          Object.keys(data).forEach(k => {
+            cleaned[k] = data[k] === null ? "" : data[k];
           });
-      } else {
-        // Uusi order — haetaan automaattinen tilausviite
-        fetch("http://127.0.0.1:5000/api/next-order-reference")
-          .then(r => r.json())
-          .then(data => {
-            setForm(prev => ({ ...prev, order_reference: data.reference }));
-          });
-      }
-    }, [orderId]);
+          setForm(prev => ({ ...prev, ...cleaned }));
+        });
+    } else {
+      fetch("http://127.0.0.1:5000/api/next-order-reference")
+        .then(r => r.json())
+        .then(data => {
+          setForm(prev => ({ ...prev, order_reference: data.reference }));
+        });
+    }
+  }, [orderId]);
 
   const handleChange = (field, value) => {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -103,7 +107,9 @@ function OrderForm({ orderId, onSave, onCancel }) {
     }));
   };
 
-  const handleSubmit = async () => {
+  // ── KORJATTU handleSubmit ────────────────────────────────────────────────
+  const handleSubmit = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
     setSaving(true);
     setError("");
     try {
@@ -111,23 +117,28 @@ function OrderForm({ orderId, onSave, onCancel }) {
         ? `http://127.0.0.1:5000/api/orders/${orderId}`
         : "http://127.0.0.1:5000/api/orders";
       const method = orderId ? "PUT" : "POST";
-      const response = await fetch(url, {
+
+      const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form)
+        body: JSON.stringify(form),
       });
-      const data = await response.json();
-      if (response.ok) {
-        onSave(data.id || orderId);
-      } else {
-        setError(data.error || "Tallennus epäonnistui");
-      }
-    } catch (err) {
-      setError("Palvelinyhteys epäonnistui");
+
+      if (!res.ok) throw new Error();
+
+      toast.success(orderId
+        ? `Tilaus ${form.order_reference} päivitetty`
+        : `Tilaus ${form.order_reference} luotu`
+      );
+      onSave();
+    } catch {
+      toast.error("Tilauksen tallennus epäonnistui");
+      setError("Tallennus epäonnistui.");
     } finally {
       setSaving(false);
     }
   };
+  // ────────────────────────────────────────────────────────────────────────
 
   // ===== TYYLIT =====
   const sectionStyle = {
@@ -169,6 +180,75 @@ function OrderForm({ orderId, onSave, onCancel }) {
 
   const grid3 = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" };
   const grid4 = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "12px" };
+
+  const customerAutocomplete = (nameField, addressField, countryField, label, dropdownKey) => {
+    const value = form[nameField] || "";
+    const filtered = value.length >= 1
+      ? customers.filter(c => c.name.toLowerCase().includes(value.toLowerCase())).slice(0, 6)
+      : [];
+    const isOpen = activeDropdown === dropdownKey && filtered.length > 0;
+
+    return (
+      <div style={{ position: "relative" }}>
+        <label style={labelStyle}>{label}</label>
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => {
+            handleChange(nameField, e.target.value);
+            setActiveDropdown(dropdownKey);
+          }}
+          onFocus={() => value && setActiveDropdown(dropdownKey)}
+          onBlur={() => setTimeout(() => setActiveDropdown(null), 150)}
+          style={inputStyle}
+          placeholder="Kirjoita hakemaan..."
+        />
+        {isOpen && (
+          <div style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            right: 0,
+            background: "#1e293b",
+            border: "1px solid #475569",
+            borderRadius: "6px",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+            zIndex: 1000,
+            overflow: "hidden",
+            marginTop: "2px"
+          }}>
+            {filtered.map(c => (
+              <div
+                key={c.id}
+                onMouseDown={() => {
+                  setForm(prev => ({
+                    ...prev,
+                    [nameField]: c.name,
+                    [addressField]: c.address || "",
+                    [countryField]: c.country || ""
+                  }));
+                  setActiveDropdown(null);
+                }}
+                style={{
+                  padding: "8px 12px",
+                  cursor: "pointer",
+                  borderBottom: "1px solid #334155",
+                  transition: "background 0.1s"
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = "rgba(249,115,22,0.1)"}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+              >
+                <div style={{ color: "#f1f5f9", fontSize: "13px" }}>{c.name}</div>
+                <div style={{ color: "#64748b", fontSize: "11px" }}>
+                  {[c.zip, c.city, c.country].filter(Boolean).join(" ")}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const checkboxRow = (field, label) => (
     <label style={{
@@ -282,45 +362,53 @@ function OrderForm({ orderId, onSave, onCancel }) {
         </div>
       </div>
 
-      {/* CONSIGNOR */}
-      <div style={sectionStyle}>
-        <h3 style={sectionTitle}>📤 Lähettäjä (Consignor)</h3>
-        <div style={grid3}>
-          {inputField("consignor_name", "Nimi")}
-          {inputField("consignor_address", "Osoite")}
-          {inputField("consignor_country", "Maa")}
+      {/* CONSIGNOR + CONSIGNEE rinnakkain */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+        <div style={sectionStyle}>
+          <h3 style={sectionTitle}>📤 Lähettäjä (Consignor)</h3>
+          <div style={{ marginBottom: "12px" }}>
+            {customerAutocomplete("consignor_name", "consignor_address", "consignor_country", "Nimi", "consignor")}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "12px" }}>
+            {inputField("consignor_address", "Osoite")}
+            {inputField("consignor_country", "Maa")}
+          </div>
+        </div>
+        <div style={sectionStyle}>
+          <h3 style={sectionTitle}>📥 Vastaanottaja (Consignee)</h3>
+          <div style={{ marginBottom: "12px" }}>
+            {customerAutocomplete("consignee_name", "consignee_address", "consignee_country", "Nimi", "consignee")}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "12px" }}>
+            {inputField("consignee_address", "Osoite")}
+            {inputField("consignee_country", "Maa")}
+          </div>
         </div>
       </div>
 
-      {/* CONSIGNEE */}
-      <div style={sectionStyle}>
-        <h3 style={sectionTitle}>📥 Vastaanottaja (Consignee)</h3>
-        <div style={grid3}>
-          {inputField("consignee_name", "Nimi")}
-          {inputField("consignee_address", "Osoite")}
-          {inputField("consignee_country", "Maa")}
+      {/* LOADING POINT + UNLOADING POINT rinnakkain */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+        <div style={sectionStyle}>
+          <h3 style={sectionTitle}>📍 Lastauspaikka (Loading Point)</h3>
+          <div style={{ marginBottom: "12px" }}>
+            {inputField("loading_point_name", "Yritys")}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 2fr", gap: "12px" }}>
+            {inputField("loading_point_country", "Maa")}
+            {inputField("loading_point_zip", "Postinro")}
+            {inputField("loading_point_city", "Kaupunki")}
+          </div>
         </div>
-      </div>
-
-      {/* LOADING POINT */}
-      <div style={sectionStyle}>
-        <h3 style={sectionTitle}>📍 Lastauspaikka (Loading Point)</h3>
-        <div style={grid4}>
-          {inputField("loading_point_name", "Yritys")}
-          {inputField("loading_point_country", "Maa")}
-          {inputField("loading_point_zip", "Postinro")}
-          {inputField("loading_point_city", "Kaupunki")}
-        </div>
-      </div>
-
-      {/* UNLOADING POINT */}
-      <div style={sectionStyle}>
-        <h3 style={sectionTitle}>🏁 Purkupaikka (Unloading Point)</h3>
-        <div style={grid4}>
-          {inputField("unloading_point_name", "Yritys")}
-          {inputField("unloading_point_country", "Maa")}
-          {inputField("unloading_point_zip", "Postinro")}
-          {inputField("unloading_point_city", "Kaupunki")}
+        <div style={sectionStyle}>
+          <h3 style={sectionTitle}>🏁 Purkupaikka (Unloading Point)</h3>
+          <div style={{ marginBottom: "12px" }}>
+            {inputField("unloading_point_name", "Yritys")}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 2fr", gap: "12px" }}>
+            {inputField("unloading_point_country", "Maa")}
+            {inputField("unloading_point_zip", "Postinro")}
+            {inputField("unloading_point_city", "Kaupunki")}
+          </div>
         </div>
       </div>
 
@@ -377,35 +465,34 @@ function OrderForm({ orderId, onSave, onCancel }) {
       {/* AIKAIKKUNAT */}
       <div style={sectionStyle}>
         <h3 style={sectionTitle}>🕐 Aikaikkunat</h3>
-          <div style={{ marginBottom: "12px", color: "#cbd5e1", fontSize: "13px" }}>
-            Lastaus
-          </div>
-          <div style={grid3}>
-            <DatePickerField
-              label="Päivä"
-              value={form.loading_date}
-              onChange={(val) => handleChange("loading_date", val)}
-              labelStyle={labelStyle}
-              inputStyle={inputStyle}
-            />
-            {inputField("loading_time_start", "Klo alku", "time")}
-            {inputField("loading_time_end", "Klo loppu", "time")}
-          </div>
-          <div style={{ marginTop: "16px", marginBottom: "12px", color: "#cbd5e1", fontSize: "13px" }}>
-            Toimitus
-          </div>
-          <div style={grid3}>
-            <DatePickerField
-              label="Päivä"
-              value={form.delivery_date}
-              onChange={(val) => handleChange("delivery_date", val)}
-              labelStyle={labelStyle}
-              inputStyle={inputStyle}
-            />
-            {inputField("delivery_time_start", "Klo alku", "time")}
-            {inputField("delivery_time_end", "Klo loppu", "time")}
-          </div>
-        
+        <div style={{ marginBottom: "12px", color: "#cbd5e1", fontSize: "13px" }}>
+          Lastaus
+        </div>
+        <div style={grid3}>
+          <DatePickerField
+            label="Päivä"
+            value={form.loading_date}
+            onChange={(val) => handleChange("loading_date", val)}
+            labelStyle={labelStyle}
+            inputStyle={inputStyle}
+          />
+          {inputField("loading_time_start", "Klo alku", "time")}
+          {inputField("loading_time_end", "Klo loppu", "time")}
+        </div>
+        <div style={{ marginTop: "16px", marginBottom: "12px", color: "#cbd5e1", fontSize: "13px" }}>
+          Toimitus
+        </div>
+        <div style={grid3}>
+          <DatePickerField
+            label="Päivä"
+            value={form.delivery_date}
+            onChange={(val) => handleChange("delivery_date", val)}
+            labelStyle={labelStyle}
+            inputStyle={inputStyle}
+          />
+          {inputField("delivery_time_start", "Klo alku", "time")}
+          {inputField("delivery_time_end", "Klo loppu", "time")}
+        </div>
       </div>
 
       {/* LISÄPALVELUT */}

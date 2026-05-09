@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { useToast } from '../hooks/useToast';
 
 const STATUS_COLORS = {
   "Suunniteltu": "#3b82f6",
@@ -17,7 +18,8 @@ function TripList({ onSelect, onCreate, refreshTrigger }) {
   const [sortDir, setSortDir] = useState("desc");
   const [openMenu, setOpenMenu] = useState(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
-
+  const toast = useToast();
+  
   useEffect(() => {
     fetchTrips();
   }, [refreshTrigger]);
@@ -41,22 +43,15 @@ function TripList({ onSelect, onCreate, refreshTrigger }) {
     }
   };
 
-  const handleDelete = async (id, e) => {
-    e.stopPropagation();
-    setOpenMenu(null);
-    if (!window.confirm("Haluatko varmasti poistaa Tripin? Yhdistetyt Orderit vapautuvat.")) return;
+  const handleDelete = async (tripId) => {
+    if (!window.confirm('Poistetaanko kuljetus?')) return;
     try {
-      const response = await fetch(`http://127.0.0.1:5000/api/trips/${id}`, {
-        method: "DELETE"
-      });
-      if (response.ok) {
-        fetchTrips();
-      } else {
-        const data = await response.json();
-        alert(data.error || "Poisto epäonnistui");
-      }
+      const res = await fetch(`http://127.0.0.1:5000/api/trips/${tripId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      toast.success('Kuljetus poistettu');
+      fetchTrips(); // tai setTrips(...) tms. — säilytä entinen logiikka
     } catch (err) {
-      alert("Virhe poistossa");
+      toast.error('Poisto epäonnistui — tarkista yhteys');
     }
   };
 
