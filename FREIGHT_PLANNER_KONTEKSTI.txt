@@ -91,12 +91,14 @@ App.js            — sidebar-layout, reititys, nested routes (URL-parametri :ta
                     Sidebar-osiot: OPERATIIVINEN / HALLINTA / TYÖKALUT
                     OPERATIIVINEN: 📊 Dashboard, 🚛 Keikkalista, 📦 Orderit, 👥 Asiakkaat
                     HALLINTA: 🏢 Kuljetusyhtiöt, 🚐 Trailerit, ⛽ Polttoainekerroin
-                    TYÖKALUT: 💰 Katelaskin
+                    TYÖKALUT: 💰 Katelaskin, 💸 Costs Dashboard
                     TripDetail reititys: /trips/:id/:tab (orders/cargo/schedule/costs)
 Dashboard.js      — ✅ sidebarin ensimmäinen (📊):
                     5 KPI-korttia, status-jako, keikkataulukko kateprosentteineen
 TripList.js       — datataulukko, haku, sorttaus, ⋮-menu
-TripDetail.js     — header + statusketju + kapasiteettipalkit +
+                    ✅ Trip ID -solun vasen reuna värikoodattu statuksen mukaan:
+                       sininen/keltainen/oranssi/vihreä/harmaa
+TripDetail.js     — header + statusketju + kapasiteettipalkit värikoodattuina +
                     4 välilehteä + laskuvahvistusmodaali
                     ✅ Vapaat orderit: hakukenttä, reittimatch, automaattinen järjestys
                     ✅ Kustannukset-välilehti uusiksi:
@@ -113,6 +115,7 @@ OrderForm.js      — Order-luonti/muokkaus
                     ✅ consignor/consignee autocomplete + automaattinen osoitetäyttö
 CostCalculator.js — tarjous/katelaskin
 AddToTripModal.js — ✅ kapasiteettipalkit oikein, reittimatch ✅⚠️❌
+                    ✅ kapasiteettipalkit värikoodattu 70/90-kynnyksillä
 DatePickerField.js— react-datepicker suomeksi
 ToastContext.js + Toast.js + useToast.js — ✅
 CustomerList.js   — ✅ haku, sorttaus, customer_type badge värikoodattu
@@ -185,6 +188,8 @@ VALMIIT KOKONAISUUDET
 ✅ 9. Polttoainekerroin-hallinta (FuelRateManager, fuel_rates-taulu, API)
 ✅ 10. TripDetail Kustannukset uusiksi (ryhmittely, 4 korttia, inline-muokkaus,
         lauttakulu per order, FREIGHT→POLTTOAINELISÄ automaatti)
+✅ 11. Costs Dashboard (💸 /costs-dashboard, KPI-kortit, aikavälisuodatin,
+        trip-taulukko, kulujakauma kategorioittain)
 
 ============================================================
 BISNESLOGIIKKA
@@ -274,10 +279,7 @@ MITÄ RAKENNETAAN (päätökset lyöty lukkoon):
    - Rajoittava tekijä ratkaisee
 
 UUDET NÄKYMÄT:
-- 💰 Costs Dashboard (sidebariin) — kokonaiskuva kaikista tripeistä
-    KPI-kortit: Kokonaisostot / Kokonaismyynti / Kokonaiskate / Avoimet kulut
-    Aikavälisuodatin (viikko/kuukausi/kvartaali/custom)
-    Kulujakauma kategorioittain
+- 💸 Costs Dashboard ✅ VALMIS — /costs-dashboard
 - 📈 Raportit (sidebariin)
     Carrier-kohtainen kannattavuus
     Reitti-kohtainen kate (FI→DE, FI→NL jne.)
@@ -401,93 +403,26 @@ FREIGHT PLANNER VS SAP — KILPAILUEDUT
    - Ei sivulatausta välilehtien välillä
 
 ============================================================
-VISUAALINEN KEHITYS — SUUNNITELMA
+VISUAALINEN KEHITYS — RAKENNUSJÄRJESTYS (päivitetty)
 ============================================================
 
-TEEMAT (6 kombinaatiota):
-  Väri x Kulmat:
-  🌑 Dark Orange  × ⬛ Terävä  (nykyinen pohja)
-  🌑 Dark Orange  × ⬜ Pyöreä
-  🌫️ Light Pro    × ⬛ Terävä  (beige + harmaa)
-  🌫️ Light Pro    × ⬜ Pyöreä
-  🔵 Corporate    × ⬛ Terävä  (tumma + sininen, SAP-tyyli)
-  🔵 Corporate    × ⬜ Pyöreä
-
-  Toteutus: CSS-muuttujat (--color-bg, --color-accent jne.)
-  body-elementin class-muutos → muutos näkyy heti
-  Tallennetaan: localStorage
-  UI: ⚙️ Asetukset sidebar alaosassa
-      Väri-valinta + Kulmat-valinta erikseen → 6 kombinaatiota
-
-STATUSVÄRIT Trip-listassa:
-  Suunniteltu → sininen
-  Vahvistettu → keltainen
-  Käynnissä   → oranssi
-  Toimitettu  → vihreä
-  Laskutettu  → harmaa
-  Rivit värikoodattu statuksen mukaan
-
-KAPASITEETTIPALKIT värikoodattuina:
-  0-70%   → vihreä  (hyvä)
-  70-90%  → oranssi (lähes täynnä)
-  90-100% → punainen (täynnä)
-  100%+   → vilkkuva punainen (ylipaino!)
-
-GLOBAALI PIKAHAKU (Ctrl+K):
-  Hakupalkki auki Ctrl+K -näppäimellä
-  Hakee kaikkialta: tripit, orderit, asiakkaat,
-                    carriers, trailerit, vetäjät
-  Tulokset ryhmitelty kategorioittain:
-    🚛 Tripit | 📦 Orderit | 👥 Asiakkaat |
-    🏢 Carriers | 🚐 Trailerit
-  Klikkaus navigoi suoraan kohteeseen
-  Backend: GET /api/search?q= (yksi endpoint kaikkeen)
-
-ILMOITUSPANEELI 🔔 (oikea yläkulma):
-  Myöhästyvät toimitukset
-  Ylikuormat (paino/LDM yli 100%)
-  Pitkään seisovat trailerit (yli X päivää)
-  Tripit ilman myyntirivejä
-
-TIMELINE/GANTT-NÄKYMÄ:
-  Trippien aikajana viikko/kuukausi näkymässä
-  Näet yhdellä silmäyksellä mitä keikkoja milloinkin
-  Toteutus: Leaflet.js tai CSS-pohjainen
-
-KARTTANÄKYMÄ:
-  Reittipisteet kartalla per trip
-  Leaflet.js — ilmainen, ei vaadi API-avainta
-
-PIKAHAKU VETÄJILLE:
-  Trucks ei omaa listanäkymää — näkyy CarrierListin alla
-  Globaali pikahaku kattaa myös vetäjät
-
-ANIMAATIOT:
-  Kortit latautuvat pehmeästi (fade in)
-  Status-muutos animoitu
-  Loading-skeleton kun data latautuu
-
-DASHBOARD DRAG & DROP:
-  Käyttäjä järjestelee KPI-kortit itse
-  Tallennetaan localStorage
-
-RAKENNUSJÄRJESTYS (visuaalinen paketti):
-  1. Statusvärit Trip-listassa
-  2. Kapasiteettipalkit värikoodattuina
-  3. Breadcrumb-navigaatio
-  4. Hallinta-osio uudelleenrakennus
-     (Kalusto & Kumppanit / Hinnoittelu / Asetukset)
-  5. Hinnoittelu-sivu (km_rates + ferry_rates tietokantaan)
-  6. Teemat (Dark/Light/Corporate × Terävä/Pyöreä)
-  7. Globaali pikahaku Ctrl+K
-  8. Dashboard kontekstuaalinen äly (hälytykset + suositukset)
-  9. Ilmoituspaneeli 🔔
-  10. Animaatiot + loading-skeleton
-  11. Viimeisimmät kohteet -historia
-  12. Sarakevalinta taulukoihin
-  13. Timeline/Gantt
-  14. Karttanäkymä
-  15. Dashboard drag & drop
+✅ 1. Statusvärit Trip-listassa
+✅ 2. Kapasiteettipalkit värikoodattuina (0-70% vihreä / 70-90% oranssi /
+      90-100% punainen / 100%+ punainen + vilkkuu + ⚠️)
+→  3. Breadcrumb-navigaatio (SEURAAVA)
+4. Hallinta-osio uudelleenrakennus
+   (Kalusto & Kumppanit / Hinnoittelu / Asetukset)
+5. Hinnoittelu-sivu (km_rates + ferry_rates tietokantaan)
+6. Teemat (Dark/Light/Corporate × Terävä/Pyöreä)
+7. Globaali pikahaku Ctrl+K
+8. Dashboard kontekstuaalinen äly (hälytykset + suositukset)
+9. Ilmoituspaneeli 🔔
+10. Animaatiot + loading-skeleton
+11. Viimeisimmät kohteet -historia
+12. Sarakevalinta taulukoihin
+13. Timeline/Gantt
+14. Karttanäkymä
+15. Dashboard drag & drop
 
 ============================================================
 POWER BI — API-INTEGRAATIO
