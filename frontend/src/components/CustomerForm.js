@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { useToast } from '../hooks/useToast';
 
 const COUNTRIES = [
@@ -6,7 +7,9 @@ const COUNTRIES = [
   "EE", "LV", "LT", "AT", "CH", "IT", "ES", "PT", "GB"
 ];
 
-function CustomerForm({ customerId, onSave, onCancel }) {
+function CustomerForm() {
+  const { id: customerId } = useParams();
+  const navigate = useNavigate();
   const [form, setForm] = useState({
     name: "",
     business_id: "",
@@ -66,7 +69,7 @@ function CustomerForm({ customerId, onSave, onCancel }) {
         ? `Asiakas "${form.name}" päivitetty`
         : `Asiakas "${form.name}" luotu`
       );
-      onSave();
+      navigate('/customers');
     } catch {
       toast.error("Tallennus epäonnistui");
       setError("Tallennus epäonnistui.");
@@ -147,7 +150,7 @@ function CustomerForm({ customerId, onSave, onCancel }) {
           )}
         </div>
         <button
-          onClick={onCancel}
+          onClick={() => navigate('/customers')}
           style={{
             background: "transparent",
             color: "#94a3b8",
@@ -278,7 +281,7 @@ function CustomerForm({ customerId, onSave, onCancel }) {
           </button>
           <button
             type="button"
-            onClick={onCancel}
+            onClick={() => navigate('/customers')}
             style={{
               background: "transparent",
               color: "#94a3b8",

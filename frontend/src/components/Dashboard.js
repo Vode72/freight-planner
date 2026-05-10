@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 
 const STATUS_COLORS = {
   "Suunniteltu": "#64748b",
@@ -30,7 +31,8 @@ function KpiCard({ label, value, sub, color }) {
   );
 }
 
-function Dashboard({ onNavigateTrip }) {
+function Dashboard() {
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -175,8 +177,8 @@ function Dashboard({ onNavigateTrip }) {
                 return (
                   <tr
                     key={t.id}
-                    onClick={() => onNavigateTrip && onNavigateTrip(t.id)}
-                    style={{ cursor: onNavigateTrip ? "pointer" : "default" }}
+                    onClick={() => navigate(`/trips/${t.id}/orders`)}
+                    style={{ cursor: "pointer" }}
                   >
                     <td style={{ color: "#f97316", fontWeight: "600" }}>{t.trip_id}</td>
                     <td>

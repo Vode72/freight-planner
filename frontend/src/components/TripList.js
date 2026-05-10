@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useToast } from '../hooks/useToast';
 
 const STATUS_COLORS = {
@@ -9,7 +10,8 @@ const STATUS_COLORS = {
   "Laskutettu": "#475569"
 };
 
-function TripList({ onSelect, onCreate, refreshTrigger }) {
+function TripList() {
+  const navigate = useNavigate();
   const [trips, setTrips] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -19,10 +21,18 @@ function TripList({ onSelect, onCreate, refreshTrigger }) {
   const [openMenu, setOpenMenu] = useState(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
   const toast = useToast();
-  
+  const scrollKey = "tms-triplist-scroll";
+
+  // Scroll-position muisti: tallenna poistuessa, palauta mountissa
+  useEffect(() => {
+    const saved = sessionStorage.getItem(scrollKey);
+    if (saved) window.scrollTo(0, parseInt(saved, 10));
+    return () => sessionStorage.setItem(scrollKey, String(Math.round(window.scrollY)));
+  }, []);
+
   useEffect(() => {
     fetchTrips();
-  }, [refreshTrigger]);
+  }, []);
 
   useEffect(() => {
     const handleClick = () => setOpenMenu(null);
@@ -139,7 +149,7 @@ function TripList({ onSelect, onCreate, refreshTrigger }) {
           </div>
         </div>
         <button
-          onClick={onCreate}
+          onClick={() => navigate('/trips/new')}
           style={{
             background: "#f97316",
             color: "#fff",
@@ -247,7 +257,7 @@ function TripList({ onSelect, onCreate, refreshTrigger }) {
             </thead>
             <tbody>
               {filteredTrips.map(t => (
-                <tr key={t.id} onClick={() => onSelect(t.id)}>
+                <tr key={t.id} onClick={() => navigate(`/trips/${t.id}/orders`)}>
                   <td style={{ color: "#f97316", fontWeight: "600" }}>
                     {t.trip_id}
                   </td>
@@ -314,7 +324,7 @@ function TripList({ onSelect, onCreate, refreshTrigger }) {
           <button
             onClick={() => {
               setOpenMenu(null);
-              onSelect(openMenu);
+              navigate(`/trips/${openMenu}/orders`);
             }}
             style={menuItemStyle}
           >

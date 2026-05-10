@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useToast } from '../hooks/useToast';
 
 const TRUCK_STATUSES = ["Vapaa", "Ajossa", "Huollossa"];
 
-function CarrierList({ onSelect, onCreate, refreshTrigger }) {
+function CarrierList() {
+  const navigate = useNavigate();
   const [carriers, setCarriers] = useState([]);
   const [trucks, setTrucks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -15,7 +17,7 @@ function CarrierList({ onSelect, onCreate, refreshTrigger }) {
   const [savingTruck, setSavingTruck] = useState(false);
   const toast = useToast();
 
-  useEffect(() => { fetchAll(); }, [refreshTrigger]);
+  useEffect(() => { fetchAll(); }, []);
 
   useEffect(() => {
     const handleClick = () => setOpenMenu(null);
@@ -140,7 +142,7 @@ function CarrierList({ onSelect, onCreate, refreshTrigger }) {
             {filtered.length} / {carriers.length} yhtiötä · {trucks.length} vetäjää
           </div>
         </div>
-        <button onClick={onCreate} style={{
+        <button onClick={() => navigate('/carriers/new')} style={{
           background: "#f97316", color: "#fff", border: "none",
           padding: "10px 20px", borderRadius: "8px", cursor: "pointer",
           fontWeight: "600", fontSize: "14px"
@@ -341,7 +343,7 @@ function CarrierList({ onSelect, onCreate, refreshTrigger }) {
           boxShadow: "0 8px 24px rgba(0,0,0,0.5)", zIndex: 9999,
           minWidth: "160px", overflow: "hidden"
         }}>
-          <button onClick={() => { setOpenMenu(null); onSelect(openMenu); }} style={menuItemStyle}>
+          <button onClick={() => { setOpenMenu(null); navigate(`/carriers/${openMenu}/edit`); }} style={menuItemStyle}>
             ✏️ Muokkaa
           </button>
           <button onClick={e => handleDeleteCarrier(openMenu, e)} style={{ ...menuItemStyle, color: "#fca5a5" }}>

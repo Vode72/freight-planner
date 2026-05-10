@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import DatePickerField from "./DatePickerField";
 import { useToast } from '../hooks/useToast';
 
-function TripForm({ tripId, onSave, onCancel }) {
+function TripForm() {
+  const { id: tripId } = useParams();
+  const navigate = useNavigate();
   const [form, setForm] = useState({
     first_pickup_country: "",
     first_pickup_zip: "",
@@ -105,8 +108,9 @@ function TripForm({ tripId, onSave, onCancel }) {
 
       if (!res.ok) throw new Error();
 
+      const data = await res.json();
       toast.success(tripId ? "Kuljetus päivitetty" : "Kuljetus luotu");
-      onSave();
+      navigate(`/trips/${data.id || tripId}/orders`);
     } catch {
       toast.error("Tallennus epäonnistui — tarkista yhteys");
       setError("Tallennus epäonnistui.");
@@ -201,7 +205,7 @@ function TripForm({ tripId, onSave, onCancel }) {
         </h2>
         <div style={{ display: "flex", gap: "8px" }}>
           <button
-            onClick={onCancel}
+            onClick={() => tripId ? navigate(`/trips/${tripId}/orders`) : navigate('/trips')}
             style={{
               background: "transparent",
               color: "#94a3b8",

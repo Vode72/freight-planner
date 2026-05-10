@@ -1123,7 +1123,7 @@ def get_costs(trip_id):
 @app.route("/api/trips/<int:trip_id>/costs", methods=["POST"])
 def add_cost(trip_id):
     conn = get_db_connection()
-    trip = conn.execute("SELECT status FROM trips WHERE id = ?", (trip_id,)).fetchone()
+    trip = conn.execute("SELECT status, loading_date FROM trips WHERE id = ?", (trip_id,)).fetchone()
 
     if not trip:
         conn.close()
@@ -1146,10 +1146,33 @@ def add_cost(trip_id):
         data.get("cost_type", "cost"),
         data.get("custom_description")
     ))
-    conn.commit()
     cost_id = cursor.lastrowid
+
+    fuel_cost_id = None
+    if data.get("cost_code") == "120":
+        ref_date = trip["loading_date"] or datetime.now().strftime("%Y-%m-%d")
+        rate = conn.execute("""
+            SELECT multiplier FROM fuel_rates
+            WHERE valid_from <= ? AND valid_to >= ?
+            ORDER BY valid_from DESC LIMIT 1
+        """, (ref_date, ref_date)).fetchone()
+
+        if rate and rate["multiplier"]:
+            fuel_amount = round(float(data.get("amount", 0)) * (rate["multiplier"] - 1.0), 2)
+            if fuel_amount > 0:
+                cursor.execute("""
+                    INSERT INTO costs (trip_id, cost_code, description, amount, cost_type)
+                    VALUES (?, '200', ?, ?, 'cost')
+                """, (trip_id, f"POLTTOAINELISÄ (kerroin {rate['multiplier']})", fuel_amount))
+                fuel_cost_id = cursor.lastrowid
+
+    conn.commit()
+    response = {"message": "Kulu lisätty", "id": cost_id}
+    if fuel_cost_id:
+        response["fuel_surcharge_added"] = True
+        response["fuel_surcharge_id"] = fuel_cost_id
     conn.close()
-    return jsonify({"message": "Kulu lisätty", "id": cost_id}), 201
+    return jsonify(response), 201
 
 
 @app.route("/api/costs/<int:cost_id>", methods=["PUT"])
@@ -1373,6 +1396,172 @@ def delete_customer(customer_id):
     conn.commit()
     conn.close()
     return jsonify({"message": "Asiakas poistettu"})
+
+
+# ===== FUEL RATES =====
+
+@app.route("/api/fuel-rates", methods=["GET"])
+def get_fuel_rates():
+    conn = get_db_connection()
+    rates = conn.execute("SELECT * FROM fuel_rates ORDER BY valid_from DESC").fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rates])
+
+
+@app.route("/api/fuel-rates/current", methods=["GET"])
+def get_current_fuel_rate():
+    date_str = request.args.get("date", datetime.now().strftime("%Y-%m-%d"))
+    conn = get_db_connection()
+    rate = conn.execute("""
+        SELECT * FROM fuel_rates
+        WHERE valid_from <= ? AND valid_to >= ?
+        ORDER BY valid_from DESC LIMIT 1
+    """, (date_str, date_str)).fetchone()
+    conn.close()
+    if rate:
+        return jsonify(dict(rate))
+    return jsonify({"multiplier": None, "message": "Ei voimassaolevaa kerrointa"}), 404
+
+
+@app.route("/api/fuel-rates", methods=["POST"])
+def create_fuel_rate():
+    data = request.get_json()
+    if not data or not data.get("valid_from") or not data.get("valid_to") or not data.get("multiplier"):
+        return jsonify({"error": "valid_from, valid_to ja multiplier ovat pakollisia"}), 400
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO fuel_rates (valid_from, valid_to, multiplier) VALUES (?, ?, ?)
+    """, (data["valid_from"], data["valid_to"], float(data["multiplier"])))
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+    return jsonify({"message": "Kerroin lisätty", "id": new_id}), 201
+
+
+@app.route("/api/fuel-rates/<int:rate_id>", methods=["PUT"])
+def update_fuel_rate(rate_id):
+    conn = get_db_connection()
+    if not conn.execute("SELECT id FROM fuel_rates WHERE id=?", (rate_id,)).fetchone():
+        conn.close()
+        return jsonify({"error": "Kerrointa ei löydy"}), 404
+    data = request.get_json()
+    conn.execute("""
+        UPDATE fuel_rates SET valid_from=?, valid_to=?, multiplier=? WHERE id=?
+    """, (data["valid_from"], data["valid_to"], float(data["multiplier"]), rate_id))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Kerroin päivitetty"})
+
+
+@app.route("/api/fuel-rates/<int:rate_id>", methods=["DELETE"])
+def delete_fuel_rate(rate_id):
+    conn = get_db_connection()
+    if not conn.execute("SELECT id FROM fuel_rates WHERE id=?", (rate_id,)).fetchone():
+        conn.close()
+        return jsonify({"error": "Kerrointa ei löydy"}), 404
+    conn.execute("DELETE FROM fuel_rates WHERE id=?", (rate_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Kerroin poistettu"})
+
+
+@app.route("/api/costs-dashboard", methods=["GET"])
+def get_costs_dashboard():
+    from_date = request.args.get("from")
+    to_date   = request.args.get("to")
+    conn = get_db_connection()
+
+    # Kulukoodien kategoriaryhmät
+    CATEGORY_CODES = {
+        "lautta":    ["500", "510"],
+        "rahti":     ["100", "120", "200", "210", "220"],
+        "tiemaksut": ["300", "310"],
+        "kalusto":   ["400", "401", "410", "830", "831"],
+        "lisat":     ["600", "610", "700", "799", "800", "810", "820"],
+    }
+
+    # WHERE-ehto loading_date-suodatukselle
+    date_filter = ""
+    params = []
+    if from_date and to_date:
+        date_filter = "WHERE t.loading_date BETWEEN ? AND ?"
+        params = [from_date, to_date]
+
+    trips_raw = conn.execute(f"""
+        SELECT
+            t.id, t.trip_id, t.status,
+            t.first_pickup_city, t.first_pickup_country,
+            t.trip_end_city, t.trip_end_country,
+            t.loading_date,
+            c.name AS carrier_name,
+            COALESCE(SUM(CASE WHEN co.cost_type='revenue' THEN co.amount ELSE 0 END),0) AS revenue,
+            COALESCE(SUM(CASE WHEN co.cost_type='cost'    THEN co.amount ELSE 0 END),0) AS costs
+        FROM trips t
+        LEFT JOIN carriers c  ON t.carrier_id = c.id
+        LEFT JOIN costs   co  ON t.id = co.trip_id
+        {date_filter}
+        GROUP BY t.id
+        ORDER BY t.loading_date DESC NULLS LAST, t.id DESC
+    """, params).fetchall()
+
+    trip_list = []
+    for t in trips_raw:
+        rev    = t["revenue"] or 0
+        osto   = t["costs"]   or 0
+        margin = rev - osto
+        pct    = round(margin / rev * 100, 1) if rev > 0 else 0.0
+        start  = f"{t['first_pickup_country'] or ''} {t['first_pickup_city'] or '—'}".strip()
+        end    = f"{t['trip_end_country'] or ''} {t['trip_end_city'] or '—'}".strip()
+        trip_list.append({
+            "id": t["id"],
+            "trip_id": t["trip_id"],
+            "status": t["status"],
+            "route": f"{start} → {end}",
+            "carrier_name": t["carrier_name"] or "—",
+            "loading_date": t["loading_date"],
+            "revenue": round(rev, 2),
+            "costs":   round(osto, 2),
+            "margin":  round(margin, 2),
+            "margin_pct": pct,
+        })
+
+    # KPI-summat
+    total_rev    = sum(r["revenue"] for r in trip_list)
+    total_costs  = sum(r["costs"]   for r in trip_list)
+    total_margin = total_rev - total_costs
+    total_pct    = round(total_margin / total_rev * 100, 1) if total_rev > 0 else 0.0
+
+    # Kategoriasummat
+    categories = {}
+    for cat_key, codes in CATEGORY_CODES.items():
+        ph = ",".join("?" * len(codes))
+        row = conn.execute(f"""
+            SELECT
+                COALESCE(SUM(CASE WHEN co.cost_type='cost'    THEN co.amount ELSE 0 END),0) AS osto,
+                COALESCE(SUM(CASE WHEN co.cost_type='revenue' THEN co.amount ELSE 0 END),0) AS myynti
+            FROM costs co
+            JOIN trips t ON co.trip_id = t.id
+            WHERE co.cost_code IN ({ph})
+            {"AND t.loading_date BETWEEN ? AND ?" if date_filter else ""}
+        """, (*codes, *params)).fetchone()
+        categories[cat_key] = {
+            "osto":   round(row["osto"]   or 0, 2),
+            "myynti": round(row["myynti"] or 0, 2),
+        }
+
+    conn.close()
+    return jsonify({
+        "kpi": {
+            "revenue":     round(total_rev, 2),
+            "costs":       round(total_costs, 2),
+            "margin":      round(total_margin, 2),
+            "margin_pct":  total_pct,
+            "trip_count":  len(trip_list),
+        },
+        "trips":      trip_list,
+        "categories": categories,
+    })
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { useToast } from '../hooks/useToast';
 
 const STATUS_COLORS = {
@@ -30,6 +31,14 @@ const COST_CODES = [
   { code: "800", description: "ODOTUSAIKA", type: "cost" },
   { code: "810", description: "LISÄKÄSITTELY", type: "cost" },
   { code: "820", description: "MUU KULU", type: "cost" },
+];
+
+const COST_GROUPS = [
+  { key: "lautta",    label: "🚢 Lautta",    codes: ["500", "510"] },
+  { key: "rahti",     label: "🚛 Rahti",     codes: ["100", "120", "200", "210", "220"] },
+  { key: "tiemaksut", label: "🛣️ Tiemaksut", codes: ["300", "310"] },
+  { key: "kalusto",   label: "🚜 Kalusto",   codes: ["400", "401", "410", "830", "831"] },
+  { key: "lisat",     label: "➕ Lisät",     codes: ["600", "610", "700", "799", "800", "810", "820"] },
 ];
 
 function CapacityBar({ label, value, max, unit }) {
@@ -119,13 +128,15 @@ function StatusChain({ currentStatus }) {
   );
 }
 
-function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
-  // ── hooks AINA komponentin sisällä ──────────────────────────────────────
+function TripDetail() {
+  const { id: tripId, tab } = useParams();
+  const navigate = useNavigate();
+  const activeTab = tab || "orders";
+
   const toast = useToast();
 
   const [trip, setTrip] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("orders");
   const [freeOrders, setFreeOrders] = useState([]);
   const [freeOrderSearch, setFreeOrderSearch] = useState("");
   const [freeOrderMatches, setFreeOrderMatches] = useState({});
@@ -140,6 +151,8 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
   const [showAddCost, setShowAddCost] = useState(false);
   const [invoiceConfirm, setInvoiceConfirm] = useState(false);
   const [statusLoading, setStatusLoading] = useState(false);
+  const [editingCostId, setEditingCostId] = useState(null);
+  const [editForm, setEditForm] = useState({ cost_code: "", description: "", amount: "", cost_type: "cost", custom_description: "" });
 
   const fetchTrip = useCallback(async () => {
     setLoading(true);
@@ -190,7 +203,6 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
       toast.success(`Tilaus lisätty kuljetukselle`);
       fetchTrip();
       fetchFreeOrders();
-      if (triggerRefresh) triggerRefresh();
     } else {
       toast.error(data.warnings ? data.warnings.join(" ") : data.error || "Lisäys epäonnistui");
     }
@@ -205,7 +217,6 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
     if (response.ok) {
       toast.success("Tilaus poistettu keikalta");
       fetchTrip();
-      if (triggerRefresh) triggerRefresh();
     } else {
       toast.error("Poisto epäonnistui");
     }
@@ -226,7 +237,6 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
       if (response.ok) {
         toast.success(`Status päivitetty: ${newStatus}`);
         fetchTrip();
-        if (triggerRefresh) triggerRefresh();
       } else {
         const data = await response.json();
         toast.error(data.error || "Statuksen päivitys epäonnistui");
@@ -253,7 +263,6 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
         toast.success("Lasku vahvistettu — kulut lukittu ✓");
         setInvoiceConfirm(false);
         fetchTrip();
-        if (triggerRefresh) triggerRefresh();
       } else {
         const data = await response.json();
         toast.error(data.error || "Laskuvahvistus epäonnistui");
@@ -331,6 +340,37 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
     }));
   };
 
+  const openEditCost = (cost) => {
+    setEditingCostId(cost.id);
+    setEditForm({
+      cost_code: cost.cost_code,
+      description: cost.description,
+      amount: String(cost.amount),
+      cost_type: cost.cost_type,
+      custom_description: cost.custom_description || ""
+    });
+  };
+
+  const handleEditSave = async () => {
+    try {
+      const res = await fetch(`http://127.0.0.1:5000/api/costs/${editingCostId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...editForm, amount: parseFloat(editForm.amount) || 0 })
+      });
+      if (res.ok) {
+        toast.success("Kulurivi päivitetty");
+        setEditingCostId(null);
+        fetchTrip();
+      } else {
+        const d = await res.json();
+        toast.error(d.error || "Päivitys epäonnistui");
+      }
+    } catch {
+      toast.error("Päivitys epäonnistui");
+    }
+  };
+
   if (loading) return (
     <div style={{ color: "#94a3b8", padding: "32px" }}>Ladataan...</div>
   );
@@ -373,7 +413,7 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
     <div>
       {/* Takaisin-nappi */}
       <button
-        onClick={onBack}
+        onClick={() => navigate('/trips')}
         style={{
           background: "transparent",
           color: "#94a3b8",
@@ -431,7 +471,7 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
           <div style={{ display: "flex", gap: "8px" }}>
             {!isLocked && (
               <button
-                onClick={onEdit}
+                onClick={() => navigate(`/trips/${tripId}/edit`)}
                 style={{
                   background: "transparent",
                   color: "#94a3b8",
@@ -559,7 +599,7 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
         {tabs.map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => navigate(`/trips/${tripId}/${tab.id}`)}
             style={{
               background: activeTab === tab.id ? "#0f172a" : "transparent",
               color: activeTab === tab.id ? "#f97316" : "#94a3b8",
@@ -919,128 +959,163 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
         {/* ===== KUSTANNUKSET ===== */}
         {activeTab === "costs" && (
           <div>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr 1fr",
-              gap: "16px",
-              marginBottom: "20px"
-            }}>
-              <div style={{ ...sectionStyle, textAlign: "center" }}>
-                <div style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "8px" }}>
-                  Myynti
+            {/* 4-column summary cards */}
+            {(() => {
+              const rev = trip.costs?.filter(c => c.cost_type === "revenue").reduce((s, c) => s + c.amount, 0) || 0;
+              const osto = trip.costs?.filter(c => c.cost_type === "cost").reduce((s, c) => s + c.amount, 0) || 0;
+              const margin = rev - osto;
+              const marginPct = rev > 0 ? (margin / rev * 100) : 0;
+              return (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "12px", marginBottom: "20px" }}>
+                  <div style={{ ...sectionStyle, textAlign: "center", marginBottom: 0 }}>
+                    <div style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>Ostot</div>
+                    <div style={{ color: "#ef4444", fontSize: "20px", fontWeight: "700", fontFamily: "monospace" }}>{osto.toFixed(2)} €</div>
+                  </div>
+                  <div style={{ ...sectionStyle, textAlign: "center", marginBottom: 0 }}>
+                    <div style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>Myynti</div>
+                    <div style={{ color: "#22c55e", fontSize: "20px", fontWeight: "700", fontFamily: "monospace" }}>{rev.toFixed(2)} €</div>
+                  </div>
+                  <div style={{ ...sectionStyle, textAlign: "center", marginBottom: 0 }}>
+                    <div style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>Kate</div>
+                    <div style={{ color: margin >= 0 ? "#22c55e" : "#ef4444", fontSize: "20px", fontWeight: "700", fontFamily: "monospace" }}>{margin.toFixed(2)} €</div>
+                  </div>
+                  <div style={{ ...sectionStyle, textAlign: "center", marginBottom: 0 }}>
+                    <div style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>Kate %</div>
+                    <div style={{ color: marginPct >= 15 ? "#22c55e" : marginPct >= 0 ? "#f97316" : "#ef4444", fontSize: "20px", fontWeight: "700", fontFamily: "monospace" }}>{marginPct.toFixed(1)} %</div>
+                  </div>
                 </div>
-                <div style={{ color: "#22c55e", fontSize: "22px", fontWeight: "700" }}>
-                  {trip.total_revenue?.toFixed(2) || "0.00"} €
-                </div>
-              </div>
-              <div style={{ ...sectionStyle, textAlign: "center" }}>
-                <div style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "8px" }}>
-                  Kulut
-                </div>
-                <div style={{ color: "#ef4444", fontSize: "22px", fontWeight: "700" }}>
-                  {trip.total_costs?.toFixed(2) || "0.00"} €
-                </div>
-              </div>
-              <div style={{ ...sectionStyle, textAlign: "center" }}>
-                <div style={{ color: "#64748b", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "8px" }}>
-                  Kate
-                </div>
-                <div style={{
-                  color: trip.margin >= 0 ? "#22c55e" : "#ef4444",
-                  fontSize: "22px",
-                  fontWeight: "700"
-                }}>
-                  {trip.margin?.toFixed(2) || "0.00"} €
-                </div>
-                <div style={{ color: "#64748b", fontSize: "12px", marginTop: "4px" }}>
-                  {trip.margin_percent?.toFixed(1) || "0.0"} %
-                </div>
-              </div>
-            </div>
+              );
+            })()}
 
-            {/* Kulurivi-lista */}
-            <div style={{ marginBottom: "16px" }}>
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: "80px 1fr 100px 80px",
-                gap: "8px",
-                padding: "8px 12px",
-                color: "#475569",
-                fontSize: "11px",
-                textTransform: "uppercase",
-                letterSpacing: "0.5px"
-              }}>
-                <div>Koodi</div>
-                <div>Kuvaus</div>
-                <div style={{ textAlign: "right" }}>Summa</div>
-                <div></div>
-              </div>
+            {/* Grouped cost rows */}
+            {(() => {
+              const allCosts = trip.costs || [];
+              const orderCount = trip.orders?.length || 0;
+              const ferryTotal = allCosts.filter(c => c.cost_code === "500").reduce((s, c) => s + c.amount, 0);
+              const ferryPerOrder = orderCount > 1 && ferryTotal > 0 ? ferryTotal / orderCount : null;
+              const groupedIds = new Set(COST_GROUPS.flatMap(g => g.codes));
 
-              {trip.costs?.length === 0 ? (
-                <div style={{
-                  padding: "24px",
-                  textAlign: "center",
-                  color: "#64748b",
-                  border: "1px dashed #334155",
-                  borderRadius: "8px"
-                }}>
-                  Ei kulurivejä. Lisää kulu alla.
-                </div>
-              ) : (
-                trip.costs?.map(cost => (
+              const renderCostRow = (cost) => {
+                const isEditing = editingCostId === cost.id;
+                if (isEditing) {
+                  return (
+                    <div key={cost.id} style={{
+                      display: "grid", gridTemplateColumns: "90px 1fr 110px 96px",
+                      gap: "6px", padding: "8px 12px",
+                      background: "rgba(249,115,22,0.08)", borderRadius: "6px",
+                      marginBottom: "3px", alignItems: "center",
+                      border: "1px solid rgba(249,115,22,0.3)"
+                    }}>
+                      <select
+                        value={editForm.cost_code}
+                        onChange={e => {
+                          const f = COST_CODES.find(c => c.code === e.target.value);
+                          setEditForm(ef => ({ ...ef, cost_code: e.target.value, description: f ? f.description : ef.description, cost_type: f ? f.type : ef.cost_type }));
+                        }}
+                        style={{ ...inputStyle, fontSize: "12px", padding: "4px 6px" }}
+                      >
+                        {COST_CODES.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
+                      </select>
+                      <input
+                        type="text"
+                        value={editForm.description}
+                        onChange={e => setEditForm(ef => ({ ...ef, description: e.target.value }))}
+                        style={{ ...inputStyle, fontSize: "13px", padding: "4px 8px" }}
+                      />
+                      <input
+                        type="number"
+                        value={editForm.amount}
+                        onChange={e => setEditForm(ef => ({ ...ef, amount: e.target.value }))}
+                        style={{ ...inputStyle, fontSize: "13px", padding: "4px 8px", textAlign: "right" }}
+                      />
+                      <div style={{ display: "flex", gap: "4px", justifyContent: "flex-end" }}>
+                        <button onClick={handleEditSave} style={{ background: "#22c55e", color: "#fff", border: "none", padding: "4px 8px", borderRadius: "4px", cursor: "pointer", fontSize: "13px" }}>✓</button>
+                        <button onClick={() => setEditingCostId(null)} style={{ background: "transparent", color: "#94a3b8", border: "1px solid #334155", padding: "4px 8px", borderRadius: "4px", cursor: "pointer", fontSize: "13px" }}>✕</button>
+                        <button onClick={() => handleDeleteCost(cost.id)} style={{ background: "transparent", color: "#ef4444", border: "1px solid #334155", padding: "4px 8px", borderRadius: "4px", cursor: "pointer", fontSize: "13px" }}>🗑️</button>
+                      </div>
+                    </div>
+                  );
+                }
+                return (
                   <div
                     key={cost.id}
+                    onClick={() => !isLocked && openEditCost(cost)}
                     style={{
-                      display: "grid",
-                      gridTemplateColumns: "80px 1fr 100px 80px",
-                      gap: "8px",
-                      padding: "10px 12px",
+                      display: "grid", gridTemplateColumns: "90px 1fr 110px 24px",
+                      gap: "6px", padding: "8px 12px",
                       background: cost.cost_type === "revenue" ? "rgba(34,197,94,0.05)" : "rgba(255,255,255,0.02)",
-                      borderRadius: "6px",
-                      marginBottom: "4px",
-                      alignItems: "center",
-                      border: `1px solid ${cost.cost_type === "revenue" ? "rgba(34,197,94,0.1)" : "#334155"}`
+                      borderRadius: "6px", marginBottom: "3px", alignItems: "center",
+                      border: `1px solid ${cost.cost_type === "revenue" ? "rgba(34,197,94,0.1)" : "#334155"}`,
+                      cursor: isLocked ? "default" : "pointer",
+                      transition: "background 0.1s"
                     }}
+                    onMouseEnter={e => { if (!isLocked) e.currentTarget.style.background = "rgba(249,115,22,0.06)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = cost.cost_type === "revenue" ? "rgba(34,197,94,0.05)" : "rgba(255,255,255,0.02)"; }}
                   >
-                    <div style={{
-                      fontFamily: "monospace",
-                      color: cost.cost_type === "revenue" ? "#22c55e" : "#94a3b8",
-                      fontSize: "12px"
-                    }}>
-                      {cost.cost_code}
-                    </div>
-                    <div style={{ color: "#cbd5e1", fontSize: "13px" }}>
-                      {cost.description}
-                      {cost.custom_description && cost.cost_code === "820" ? ` — ${cost.custom_description}` : ""}
-                    </div>
-                    <div style={{
-                      textAlign: "right",
-                      color: cost.cost_type === "revenue" ? "#22c55e" : "#f1f5f9",
-                      fontWeight: "600",
-                      fontFamily: "monospace"
-                    }}>
+                    <div style={{ fontFamily: "monospace", color: cost.cost_type === "revenue" ? "#22c55e" : "#94a3b8", fontSize: "12px" }}>{cost.cost_code}</div>
+                    <div style={{ color: "#cbd5e1", fontSize: "13px" }}>{cost.description}</div>
+                    <div style={{ textAlign: "right", color: cost.cost_type === "revenue" ? "#22c55e" : "#f1f5f9", fontWeight: "600", fontFamily: "monospace", fontSize: "13px" }}>
                       {cost.cost_type === "revenue" ? "+" : ""}{cost.amount?.toFixed(2)} €
                     </div>
-                    <div style={{ textAlign: "right" }}>
-                      {!isLocked && (
-                        <button
-                          onClick={() => handleDeleteCost(cost.id)}
-                          style={{
-                            background: "transparent",
-                            color: "#64748b",
-                            border: "none",
-                            cursor: "pointer",
-                            fontSize: "14px"
-                          }}
-                        >
-                          🗑️
-                        </button>
-                      )}
-                    </div>
+                    <div>{!isLocked && <span style={{ color: "#475569", fontSize: "11px" }}>✏️</span>}</div>
                   </div>
-                ))
-              )}
-            </div>
+                );
+              };
+
+              return (
+                <div style={{ marginBottom: "16px" }}>
+                  {COST_GROUPS.map(group => {
+                    const rows = allCosts.filter(c => group.codes.includes(c.cost_code));
+                    if (rows.length === 0) return null;
+                    const gRev = rows.filter(c => c.cost_type === "revenue").reduce((s, c) => s + c.amount, 0);
+                    const gCost = rows.filter(c => c.cost_type === "cost").reduce((s, c) => s + c.amount, 0);
+                    return (
+                      <div key={group.key} style={{ marginBottom: "10px" }}>
+                        <div style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                          padding: "5px 12px", background: "#0f172a",
+                          borderRadius: "6px 6px 0 0", border: "1px solid #334155", borderBottom: "none"
+                        }}>
+                          <span style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "600" }}>{group.label}</span>
+                          <span style={{ fontFamily: "monospace", fontSize: "12px" }}>
+                            {gRev > 0 && <span style={{ color: "#22c55e" }}>+{gRev.toFixed(2)} €</span>}
+                            {gRev > 0 && gCost > 0 && <span style={{ color: "#475569" }}> / </span>}
+                            {gCost > 0 && <span style={{ color: "#ef4444" }}>-{gCost.toFixed(2)} €</span>}
+                          </span>
+                        </div>
+                        <div style={{ border: "1px solid #334155", borderTop: "none", borderRadius: "0 0 6px 6px", padding: "6px 0" }}>
+                          {rows.map(renderCostRow)}
+                          {group.key === "lautta" && ferryPerOrder !== null && (
+                            <div style={{ padding: "2px 12px 4px", color: "#64748b", fontSize: "11px" }}>
+                              ≈ {ferryPerOrder.toFixed(2)} € / order ({orderCount} orderia)
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {(() => {
+                    const ungrouped = allCosts.filter(c => !groupedIds.has(c.cost_code));
+                    if (ungrouped.length === 0) return null;
+                    return (
+                      <div style={{ marginBottom: "10px" }}>
+                        <div style={{ padding: "5px 12px", background: "#0f172a", borderRadius: "6px 6px 0 0", border: "1px solid #334155", borderBottom: "none" }}>
+                          <span style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "600" }}>Muut</span>
+                        </div>
+                        <div style={{ border: "1px solid #334155", borderTop: "none", borderRadius: "0 0 6px 6px", padding: "6px 0" }}>
+                          {ungrouped.map(renderCostRow)}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {allCosts.length === 0 && (
+                    <div style={{ padding: "24px", textAlign: "center", color: "#64748b", border: "1px dashed #334155", borderRadius: "8px" }}>
+                      Ei kulurivejä. Lisää kulu alla.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Lisää kulu */}
             {!isLocked && (
@@ -1049,43 +1124,25 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
                   <button
                     onClick={() => setShowAddCost(true)}
                     style={{
-                      background: "transparent",
-                      color: "#f97316",
-                      border: "1px dashed #f97316",
-                      padding: "10px 20px",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      fontSize: "13px",
-                      width: "100%"
+                      background: "transparent", color: "#f97316",
+                      border: "1px dashed #f97316", padding: "10px 20px",
+                      borderRadius: "6px", cursor: "pointer", fontSize: "13px", width: "100%"
                     }}
                   >
                     + Lisää kulurivi
                   </button>
                 ) : (
-                  <div style={{
-                    background: "#0f172a",
-                    border: "1px solid #334155",
-                    borderRadius: "8px",
-                    padding: "16px"
-                  }}>
-                    <div style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr 120px",
-                      gap: "12px",
-                      marginBottom: "12px"
-                    }}>
+                  <div style={{ background: "#0f172a", border: "1px solid #334155", borderRadius: "8px", padding: "16px" }}>
+                    {newCost.cost_code === "120" && (
+                      <div style={{ color: "#f97316", fontSize: "12px", marginBottom: "8px" }}>
+                        ⛽ FREIGHT-rivi lisää automaattisesti POLTTOAINELISÄ (200) -rivin.
+                      </div>
+                    )}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 120px", gap: "12px", marginBottom: "12px" }}>
                       <div>
                         <div style={{ color: "#94a3b8", fontSize: "12px", marginBottom: "4px" }}>Kulukoodi</div>
-                        <select
-                          value={newCost.cost_code}
-                          onChange={(e) => handleCostCodeChange(e.target.value)}
-                          style={{ ...inputStyle, width: "100%" }}
-                        >
-                          {COST_CODES.map(c => (
-                            <option key={c.code} value={c.code}>
-                              {c.code} — {c.description}
-                            </option>
-                          ))}
+                        <select value={newCost.cost_code} onChange={(e) => handleCostCodeChange(e.target.value)} style={{ ...inputStyle, width: "100%" }}>
+                          {COST_CODES.map(c => <option key={c.code} value={c.code}>{c.code} — {c.description}</option>)}
                         </select>
                       </div>
                       <div>
@@ -1095,17 +1152,9 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
                         <input
                           type="text"
                           value={newCost.cost_code === "820" ? newCost.custom_description : newCost.description}
-                          onChange={(e) => {
-                            if (newCost.cost_code === "820") {
-                              setNewCost(prev => ({ ...prev, custom_description: e.target.value }));
-                            }
-                          }}
+                          onChange={(e) => { if (newCost.cost_code === "820") setNewCost(prev => ({ ...prev, custom_description: e.target.value })); }}
                           readOnly={newCost.cost_code !== "820"}
-                          style={{
-                            ...inputStyle,
-                            width: "100%",
-                            opacity: newCost.cost_code !== "820" ? 0.6 : 1
-                          }}
+                          style={{ ...inputStyle, width: "100%", opacity: newCost.cost_code !== "820" ? 0.6 : 1 }}
                         />
                       </div>
                       <div>
@@ -1152,6 +1201,12 @@ function TripDetail({ tripId, onBack, onEdit, triggerRefresh }) {
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {isLocked && (
+              <div style={{ marginTop: "12px", padding: "10px 16px", background: "rgba(71,85,105,0.15)", border: "1px solid #475569", borderRadius: "8px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>
+                🔒 Keikka on laskutettu — kulut lukittu
               </div>
             )}
 

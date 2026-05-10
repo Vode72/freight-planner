@@ -1,5 +1,5 @@
 FREIGHT PLANNER — PROJEKTIN KONTEKSTI VS CODE CLAUDELLE
-Päivitetty: 09.05.2026
+Päivitetty: 10.05.2026 (v5)
 ============================================================
 
 ROOLI:
@@ -29,6 +29,12 @@ trips:
   ferry_route, ferry_departure, ferry_arrival,
   adr, tail_lift, temperature_controlled,
   loading_instructions, notes
+  ── TULOSSA ──
+  loading_started_at    (FEC-kuittaus)
+  loading_completed_at  (FEC-kuittaus)
+  delivery_started_at   (FEC-kuittaus)
+  delivery_completed_at (FEC-kuittaus)
+  delivered_at          (OTD-laskenta, asetetaan kun status → Toimitettu)
 
 orders:
   order_id (ORD-2026-001), trip_id, status (Vapaa/Tripillä),
@@ -44,6 +50,11 @@ orders:
 
 costs:
   trip_id, cost_code, description, amount, cost_type (cost/revenue), custom_description
+
+fuel_rates: ── UUSI TAULU ──
+  id, valid_from, valid_to, multiplier
+  Esim: 2026-05-01 / 2026-05-31 / 1.18
+  Hallitaan Hallinta-osiossa (⛽ Polttoainekerroin)
 
 trailers: (12 kpl TIP Trailer Services)
   plate_number, identifier, trailer_type, leasing_rate, rental_rate, status
@@ -65,20 +76,36 @@ customers: ✅ VALMIS
   Demo-asiakkaat: Nordic Demo Plastics Oy, Baltic Demo Foods Oy,
                   Demo Retail Finland Oy, Euro Demo GmbH, Continental Demo BV
 
+init_db.py sisältää nyt demodata:
+  - 7 demo-trippiä (TRP-2026-001..007) eri statuksilla
+  - 12 orderia realistisilla tiedoilla
+  - 15 kustannusriviä neljälle tripille
+  (carriers 6kpl, trailers 12kpl, customers 8kpl ennallaan)
+
 ============================================================
 VALMIIT KOMPONENTIT
 ============================================================
 
 Login.js          — kirjautuminen (demo/freight2024)
-App.js            — sidebar-layout, reititys
-                    ✅ Asiakkaat-linkki + reititys
-                    ✅ Hallinta-osio: 🏢 Kuljetusyhtiöt + 🚛 Trailerit
+App.js            — sidebar-layout, reititys, nested routes (URL-parametri :tab)
+                    Sidebar-osiot: OPERATIIVINEN / HALLINTA / TYÖKALUT
+                    OPERATIIVINEN: 📊 Dashboard, 🚛 Keikkalista, 📦 Orderit, 👥 Asiakkaat
+                    HALLINTA: 🏢 Kuljetusyhtiöt, 🚐 Trailerit, ⛽ Polttoainekerroin
+                    TYÖKALUT: 💰 Katelaskin
+                    TripDetail reititys: /trips/:id/:tab (orders/cargo/schedule/costs)
 Dashboard.js      — ✅ sidebarin ensimmäinen (📊):
                     5 KPI-korttia, status-jako, keikkataulukko kateprosentteineen
 TripList.js       — datataulukko, haku, sorttaus, ⋮-menu
 TripDetail.js     — header + statusketju + kapasiteettipalkit +
                     4 välilehteä + laskuvahvistusmodaali
                     ✅ Vapaat orderit: hakukenttä, reittimatch, automaattinen järjestys
+                    ✅ Kustannukset-välilehti uusiksi:
+                       4 yhteenvetokorttia (Myynti / Ostot / Kate€ / Kate%)
+                       ryhmittely kategorioittain (🚢 Lautta / 🚛 Rahti / 🛣️ Tiemaksut /
+                       🚜 Kalusto / ➕ Lisät)
+                       inline-muokkaus (kynäkuvake per rivi)
+                       lauttakulu (500) jaettu tasan per order erittelynä
+                       FREIGHT (120) lisää automaattisesti POLTTOAINELISÄ (200) -rivin
 TripForm.js       — Trip-luonti/muokkaus, kalenteri, pudotusvalikot
 OrderList.js      — datataulukko, haku, sorttaus, ⋮-menu
                     ✅ "📋 Kopioi order"
@@ -90,14 +117,22 @@ DatePickerField.js— react-datepicker suomeksi
 ToastContext.js + Toast.js + useToast.js — ✅
 CustomerList.js   — ✅ haku, sorttaus, customer_type badge värikoodattu
 CustomerForm.js   — ✅ customer_type dropdown
-CarrierList.js    — ✅ UUSI — kuljetusyhtiölista haulla
+CarrierList.js    — ✅ kuljetusyhtiölista haulla
                     rivi aukeaa → näyttää vetäjät inlinenä
                     vetäjän lisäys, statuksen muutos, poisto suoraan listasta
-CarrierForm.js    — ✅ UUSI — kuljetusyhtiön luonti/muokkaus
-TrailerList.js    — ✅ UUSI — trailerilista tyyppisuodattimella, haulla, sorttauksella
+CarrierForm.js    — ✅ kuljetusyhtiön luonti/muokkaus
+TrailerList.js    — ✅ trailerilista tyyppisuodattimella, haulla, sorttauksella
                     näyttää leasing/vuokrahinnat
-TrailerForm.js    — ✅ UUSI — trailerin luonti/muokkaus
+TrailerForm.js    — ✅ trailerin luonti/muokkaus
                     muistutus automaattisesta trailervuokralaskennasta
+FuelRateManager.js— ✅ polttoainekertoimien hallinta (Hallinta-osio, /fuel)
+                    kuukausittaiset kertoimet, voimassa/vanhentunut/tuleva status
+                    kuluvan päivän kerroin korostettuna + esimerkkisumma
+CostsDashboard.js — ✅ Costs Dashboard (💸 Työkalut-osiossa sidebarissa)
+                    4 KPI-korttia (Myynti / Ostot / Kate€ / Kate%)
+                    aikavälisuodatin (viikko/kuukausi/kvartaali/vuosi/custom)
+                    sorttautuva trip-taulukko 8 saraketta, navigoi trippiin
+                    CSS-pohjainen kulujakauma kategorioittain (🚢🚛🛣️🚜➕)
 
 ============================================================
 VALMIIT API-ENDPOINTIT
@@ -108,25 +143,30 @@ Reference:  GET /api/trailer-types, /api/trailer-specs, /api/incoterms
             GET /api/transport-types, /api/statuses, /api/ferry-routes
             GET /api/cost-codes, /api/pallet-types, /api/next-order-reference
 Trailers:   GET /api/trailers
-            ✅ POST /api/trailers
-            ✅ PUT /api/trailers/:id (kaikki kentät)
-            ✅ DELETE /api/trailers/:id (tarkistaa aktiiviset keikkalinkit)
+            POST /api/trailers
+            PUT /api/trailers/:id (kaikki kentät)
+            DELETE /api/trailers/:id (tarkistaa aktiiviset keikkalinkit)
 Carriers:   GET /api/carriers
-            ✅ POST /api/carriers
-            ✅ PUT /api/carriers/:id
-            ✅ DELETE /api/carriers/:id (tarkistaa aktiiviset keikkalinkit)
+            POST /api/carriers
+            PUT /api/carriers/:id
+            DELETE /api/carriers/:id (tarkistaa aktiiviset keikkalinkit)
 Trucks:     GET /api/trucks?carrier_id=
-            ✅ POST /api/trucks
-            ✅ PUT /api/trucks/:id
-            ✅ DELETE /api/trucks/:id (tarkistaa aktiiviset keikkalinkit)
+            POST /api/trucks
+            PUT /api/trucks/:id
+            DELETE /api/trucks/:id (tarkistaa aktiiviset keikkalinkit)
 Trips:      GET/POST /api/trips, GET/PUT/DELETE /api/trips/:id
-            ✅ GET palauttaa total_weight, total_loading_meters, total_volume
+            GET palauttaa total_weight, total_loading_meters, total_volume
             PUT /api/trips/:id/status, POST /api/trips/:id/confirm-invoice
 Orders:     GET/POST /api/orders, GET/PUT/DELETE /api/orders/:id
             POST/DELETE /api/trips/:id/orders/:id
 Costs:      GET/POST /api/trips/:id/costs, PUT/DELETE /api/costs/:id
 Route:      GET /api/route-match
 Customers:  GET/POST /api/customers, GET/PUT/DELETE /api/customers/:id
+Fuel:       GET/POST /api/fuel-rates
+            GET /api/fuel-rates/current?date=YYYY-MM-DD
+            PUT /api/fuel-rates/:id
+            DELETE /api/fuel-rates/:id
+Dashboard:  GET /api/costs-dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD
 
 ============================================================
 VALMIIT KOKONAISUUDET
@@ -135,9 +175,16 @@ VALMIIT KOKONAISUUDET
 ✅ 1. Toast-ilmoitukset
 ✅ 2. Asiakasrekisteri (+ customer_type kaikkialla)
 ✅ 3. Order-to-Trip flow viimeistely
+✅ 4. Kompakti layout TripDetail
+       - Kalusto & Reitti: 3-kolumni (Kuljetusyhtiö | Kalusto | Reitti)
+       - Aikataulut: 3-kolumni lauttareitillä (Lastaus | Toimitus | Lauttayhteys),
+         2-kolumni ilman lauttaa
 ✅ 5. Dashboard + KPI
 ✅ 7. Orderin kopiointi
 ✅ 8. Hallintanäkymät (CarrierList+Form, TrailerList+Form, trucks inlinenä)
+✅ 9. Polttoainekerroin-hallinta (FuelRateManager, fuel_rates-taulu, API)
+✅ 10. TripDetail Kustannukset uusiksi (ryhmittely, 4 korttia, inline-muokkaus,
+        lauttakulu per order, FREIGHT→POLTTOAINELISÄ automaatti)
 
 ============================================================
 BISNESLOGIIKKA
@@ -146,6 +193,7 @@ BISNESLOGIIKKA
 STATUS-KETJU: Suunniteltu → Vahvistettu → Käynnissä → Toimitettu → Laskutettu
 - Laskutettu = lukittu, ei muutoksia
 - Vahvistus → automaattinen trailervuokra (400 osto + 401 myynti)
+- Toimitettu → delivered_at timestamp asetetaan automaattisesti (OTD-laskenta)
 
 LAUTTAREITIT:
 - Helsinki - Travemünde (Finnlines) 1050€
@@ -163,6 +211,7 @@ KULUKOODIT: 100(SPOT), 120(FREIGHT), 200(POLTTOAINELISÄ),
 KAPASITEETTITYYPIT:
 - Thermo: Umpikaappi, Sivuaukeava, Umpikaappi 2-koneinen
 - Standard: Pressutrailer, Megatrailer
+- Max LDM: 13,6m | Max paino: 24 000kg
 
 REITTIMATCH-LOGIIKKA: good ✅ / warning ⚠️ / bad ❌
 - Sama maa + sama postialue → good
@@ -170,13 +219,238 @@ REITTIMATCH-LOGIIKKA: good ✅ / warning ⚠️ / bad ❌
 - Naapurimaa → warning
 - Muu → bad
 
+TÄYTTÖASTEEN LASKENTA:
+- LDM%:   käytetty / 13,6m
+- Paino%: käytetty / 24 000kg
+- Rajoittava tekijä ratkaisee (suurempi % = todellinen täyttöaste)
+
+============================================================
+KULUJEN SEURANTA — SUUNNITELMA
+============================================================
+
+MITÄ ON VALMIINA:
+✅ Kulurivit per trip (costs-taulu)
+✅ Osto vs. myynti (cost_type)
+✅ Kate per trip (dashboard)
+
+MITÄ RAKENNETAAN (päätökset lyöty lukkoon):
+
+1. LAUTTAKULU PER ORDER
+   - Lauttakulu (koodi 500) jaetaan tasan kaikille tripin ordereille
+   - Näkyy TripDetailin Kustannukset-välilehdellä per order erittelynä
+   - Laskenta: ferry_cost / COUNT(orders WHERE trip_id = X)
+
+2. POLTTOAINELISÄ-AUTOMAATIO
+   - Kuukausittainen kerroin (fuel_rates-taulu)
+   - Kun rahti (koodi 120) syötetään → polttoainelisä (koodi 200) lasketaan automaattisesti
+   - Näkyy erillisenä rivinä laskulla
+   - Kerroin hallitaan Hallinta-osiossa (⛽ Polttoainekerroin)
+   - Dispatcheri voi muokata tarvittaessa
+
+3. FEC-KUITTAUSSIVU (Freight Plannerin oma toiminto)
+   - Kuljettaja saa linkin: /driver/TRP-2026-001
+   - Kuittaa: Lastaus alkanut / Lastaus valmis / Purku alkanut / Purku valmis
+   - Timestampit tallentuvat trips-tauluun
+   - Kolme automaattia tästä:
+     a) Odotusaika: aikaikkunan ylitys → koodi 800 automaattisesti costs-tauluun
+     b) OTD: delivery_completed_at vs. delivery_date
+     c) Seisontapäivät: delivery_completed_at → seuraava loading_started_at
+
+4. SEISONTAPÄIVÄT
+   - Lasketaan FEC-timestampeista automaattisesti
+   - Näkyy TrailerList-näkymässä prioriteettijärjestyksessä
+   - Vanhin seisoja = korkein prioriteetti seuraavaan keikkaan
+   - Hälytys jos trailer seisonut yli X päivää
+
+5. OTD (On-Time Delivery)
+   - Seurataan "Toimitettu"-statuksen aikaleimaa
+   - Ajoissa = toimitettu delivery_date:na tai ennen
+   - Myöhässä 1pv = pieni poikkeama
+   - Myöhässä 2+pv = reklamaatioriski
+   - KPI-kortti Dashboardiin
+
+6. TÄYTTÖASTE
+   - LDM-pohjainen + painopohjainen (molemmat)
+   - Rajoittava tekijä ratkaisee
+
+UUDET NÄKYMÄT:
+- 💰 Costs Dashboard (sidebariin) — kokonaiskuva kaikista tripeistä
+    KPI-kortit: Kokonaisostot / Kokonaismyynti / Kokonaiskate / Avoimet kulut
+    Aikavälisuodatin (viikko/kuukausi/kvartaali/custom)
+    Kulujakauma kategorioittain
+- 📈 Raportit (sidebariin)
+    Carrier-kohtainen kannattavuus
+    Reitti-kohtainen kate (FI→DE, FI→NL jne.)
+    Keikkajakauma maittain
+    OTD per carrier
+    Täyttöasteet
+- ⛽ Polttoainekerroin (Hallinta-osioon)
+    Kuukausittainen ylläpito
+- 📱 FEC-kuittaussivu (kuljettajan näkymä)
+
+KULUJEN RYHMITTELY UI:SSA:
+  🚢 Lautta
+  🚛 Rahti/Transport
+  🛣️ Tiemaksut
+  🚜 Kalusto
+  ➕ Lisät
+
+RAKENNUSJÄRJESTYS:
+✅ 1. Tietokantamuutokset (trips + fuel_rates)
+✅ 2. Polttoainekerroin-hallinta (⛽ FuelRateManager + API)
+✅ 3. TripDetailin Kustannukset-välilehti uusiksi (ryhmittely, inline-muokkaus)
+✅ 4. Costs Dashboard (CostsDashboard + /api/costs-dashboard)
+→  5. FEC-kuittaussivu + automaatiot (SEURAAVA)
+   6. Raportit-näkymä
+   7. Power BI API-endpointit
+
+============================================================
+POWER BI — API-INTEGRAATIO
+============================================================
+
+Suora REST API -yhteys Power BI:stä Freight Plannerin backendiin.
+Data päivittyy automaattisesti ilman Excel-exportia.
+Power BI: Get Data → Web → URL → automaattinen päivitys
+
+OMAT NIMIKKEET (ei DHL-kopioita):
+
+SIVU 1 — "Kapasiteetti & Tehokkuus"
+  KPI-kortit:
+    🎯 Kuorman täyttöaste (Avg LDM%)       ← total_loading_meters / 13,6m
+    ⚖️  Painotäyttöaste (Avg Weight%)        ← total_weight / 24000kg
+    🚛 Keikkoja kuussa                      ← COUNT(trips)
+    📦 Ordereja per keikka                  ← AVG(orders per trip)
+  Trendiviiva: täyttöaste per viikko
+  Pylväät: täyttöaste per kohdeMaa
+  Taulukko: Carrier | Keikkoja | Avg LDM% | Avg Paino% | Avg Ordereja
+
+SIVU 2 — "Kannattavuus"
+  KPI-kortit:
+    💵 Kokonaismyynti                       ← SUM(costs WHERE type=revenue)
+    💸 Kokonaisostot                        ← SUM(costs WHERE type=cost)
+    📈 Kate €                               ← myynti - ostot
+    📊 Kate %                               ← kate / myynti
+  Trendiviiva: kate per kuukausi
+  Pylväät: kate per carrier
+  Pylväät: kate per kohdeMaa (FI→DE, FI→NL jne.)
+  Taulukko: Trip | Reitti | Ostot | Myynti | Kate€ | Kate% | Status
+
+SIVU 3 — "Toimitustäsmällisyys"
+  KPI-kortit:
+    ✅ OTD% — ajoissa                       ← delivered_at <= delivery_date
+    ⚠️  Myöhässä 1 pv                        ← poikkeama 1pv
+    ❌ Myöhässä 2+ pv                       ← reklamaatioriski
+    ⛴️  Lauttamyöhästymiset                  ← ferry_route + OTD
+  Trendiviiva: OTD% per viikko
+  Pylväät: OTD% per carrier
+  Pylväät: OTD% per kohdeMaa
+
+SIVU 4 — "Kalusto"
+  KPI-kortit:
+    📅 Avg. seisontapäivät                  ← delivery_completed_at → loading_started_at
+    🔴 Pisimpään seisonut trailer            ← MAX(seisonta-aika)
+    🔄 Kiertonopeus (keikkaa/kk per trailer) ← COUNT(trips) / trailer / kk
+    💰 Seisontakustannus                    ← seisontapäivät × leasing_rate
+  Taulukko: Trailer | Tyyppi | Seisontapäivät | Keikkoja/kk | Käyttöaste% | Kustannus
+
+UUDET ENDPOINTIT:
+  GET /api/powerbi/costs       — kuludata (trip, kulukoodi, osto/myynti, kate)
+  GET /api/powerbi/operations  — operatiivinen data (täyttöaste, OTD, seisonta)
+  GET /api/powerbi/trailers    — trailerdata (seisontapäivät, käyttöaste)
+  GET /api/powerbi/otd         — toimitustäsmällisyys per carrier/reitti
+
+============================================================
+VALMIIT API-ENDPOINTIT — TULOSSA
+============================================================
+
+FEC:    GET  /api/driver/:trip_id           — kuljettajan näkymä
+        POST /api/driver/:trip_id/checkin   — kuittaus (loading_started jne.)
+PowerBI:GET /api/powerbi/costs
+        GET /api/powerbi/operations
+        GET /api/powerbi/trailers
+        GET /api/powerbi/otd
+
 ============================================================
 TULEVA KEHITYS
 ============================================================
 
-4.  Kompakti layout (TripDetail 3-palsta, OrderForm 2-3 palsta)
-6.  CMR + Transport Order + PDF-lasku
-9.  Seisontapäivät + älykäs trailerisuositus
+6.  CMR + Transport Order + Gateway Instruction List + PDF-lasku
+
+    KOLME DOKUMENTTIA — milloin mikäkin:
+    ┌─────────────────────────┬──────────────────────┬─────────────────────┐
+    │ Dokumentti              │ Milloin              │ Kenelle             │
+    ├─────────────────────────┼──────────────────────┼─────────────────────┤
+    │ Transport Order         │ Trip vahvistetaan    │ Kuljetusyhtiö       │
+    │ Gateway Instruction List│ Terminaalilastaus    │ Terminaali/gateway  │
+    │ CMR                     │ Lastauksen yhteydessä│ Kuljettaja + vast.  │
+    └─────────────────────────┴──────────────────────┴─────────────────────┘
+
+    KAKSI CARRIER-TYYPPIÄ PER TRIP:
+      Mantereen vetäjä: lastaa FI → ajaa satamaan → lautta → kohdeMaa
+      Kotimaan vetäjä:  hakee satamasta → purkaa Suomessa
+      Trips-tauluun lisättävä:
+        carrier_id            (kotimaan, jo olemassa)
+        truck_plate           (kotimaan, jo olemassa)
+        continent_carrier_id  (mantereen vetäjä) ── TULOSSA
+        continent_truck_plate (mantereen rekka)  ── TULOSSA
+
+    SEND INSTRUCTIONS -WORKFLOW (PEV:n mallin mukaan):
+      Trip vahvistetaan →
+        1. Transport Order PDF → sähköpostilla kuljetusyhtiölle
+        2. SMS kuljettajalle (automaattinen teksti + FEC-linkki)
+        3. Kuljettaja kuittaa FEC-linkistä
+
+    TULOSTUS/LÄHETYSVALIKKO TripDetailissa:
+      📤 Lähetä ohjeet
+        ├── 📧 Transport Order (PDF sähköpostilla kuljetusyhtiölle)
+        │     Mantereen vetäjä: lastausohjeet FI → satama
+        │     Kotimaan vetäjä:  purkuohjeet satama → kohteet
+        │     Valitaan kumpi lähetetään — tai molemmat erikseen
+        ├── 💬 SMS kuljettajalle (automaattinen teksti)
+        │     Muoto:
+        │       Unit: [truck] [trailer]
+        │       Delivery 1: [osoite] - [ldm]/[kg]/[qty][pallet_type] - [lastauskaupunki]
+        │       Delivery 2: ...
+        │       Kuittaa toimitukset: https://freightplanner.com/driver/TRP-2026-001
+        ├── 🏭 Gateway Instruction List → PDF terminaalille
+        └── 📋 CMR                     → PDF kuljettajalle
+
+    TRANSPORT ORDER — sisältö:
+    Kentät valmiina Freight Plannerissa lähes kokonaan:
+      - carriers (nimi, osoite, VAT lisättävä ❌)
+      - trips (trip_id, ferry_route, adr, temperature_controlled, truck_plate, trailer_id)
+      - orders (reitti, loading_point, quantity, ldm, weight, goods_description,
+                loading_instructions, order_reference)
+      - FEC-linkki samassa näkymässä: /driver/TRP-2026-001
+        → Transport Order näkymä (tulostettava PDF)
+        → FEC-kuittauspainikkeet (Lastaus alkanut/valmis, Purku alkanut/valmis)
+    Lisättävä tietokantaan:
+      carriers: + vat_number
+      settings: + forwarder_name, forwarder_address, forwarder_contact (kiinteä)
+
+    GATEWAY INSTRUCTION LIST — terminaalilastauksen ohje
+    Kentät valmiina lähes kokonaan:
+      - trips (trip_id, trailer_id, truck_plate, ferry_departure/arrival)
+      - carriers (road supplier)
+      - orders per rivi (CD LOAD):
+          consignor → consignee, inbound ref, quantity, ldm, cbm, weight,
+          goods_description, loading_instructions (remarks), adr
+      - SUM OUTBOUND: lasketaan automaattisesti
+    Lisättävä:
+      - Viivakoodi per order (generoitaisiin automaattisesti)
+      - "Scanned for ARR/INV" status → FEC-kuittaus päivittää reaaliajassa
+      - Gateway-terminaali (kiinteä tai trips-tauluun)
+    FEC-yhteys:
+      Kuljettaja kuittaa orderit terminaalissa
+      → "Scanned for ARR/INV: YES" päivittyy automaattisesti
+      → Timestamp tallentuu
+
+    CMR — kansainvälinen rahtikirja
+    Kentät valmiina lähes kokonaan:
+      - consignor, consignee, loading/unloading point, quantity, weight,
+        goods_description, loading_instructions, incoterms, truck_plate, trailer_id
+    CMR-numero generoidaan automaattisesti
+9.  Älykäs trailerisuositus (seisontapäivät valmis → tämä seuraava)
 10. Multiuser + roolit
 11. Sisäiset hälytykset
 12. Poikkeamanhallinta
@@ -185,11 +459,20 @@ TULEVA KEHITYS
 15. Sähköposti (Transport Order PDF)
 16. POD
 17. Dokumenttien tallennus + tulliasiakirjat
-18. Reittioptimointi
+18. Reittioptimointi (ajokilometrit automaattisesti — OSRM tai Google Maps API)
 19. Karttaseuranta
 20. Ajo/lepoaikalaskuri (EU 561/2006)
 
+============================================================
+GIT-Tilanne
+============================================================
+GitHub: github.com/Vode72/freight-planner
+.gitignore: node_modules/ ja freight.db jätetään pois
+Viimeisin commit: React Router v7 + Costs Dashboard
+
+============================================================
 --- MYÖHEMMIN ---
+============================================================
 Traffic Coordinator Planner — oma välilehti Freight Plannerissa
   Konseptit: Daily Traffic Plan, Est. Disc. Time, Closing Time,
              Vessel ETA, Import/Export-flow, riskilogiikka

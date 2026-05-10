@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useToast } from '../hooks/useToast';
 
 const STATUS_COLORS = { "Vapaa": "#22c55e", "Käytössä": "#f97316", "Huollossa": "#64748b" };
 
-function TrailerList({ onSelect, onCreate, refreshTrigger }) {
+function TrailerList() {
+  const navigate = useNavigate();
   const [trailers, setTrailers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -14,7 +16,7 @@ function TrailerList({ onSelect, onCreate, refreshTrigger }) {
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
   const toast = useToast();
 
-  useEffect(() => { fetchTrailers(); }, [refreshTrigger]);
+  useEffect(() => { fetchTrailers(); }, []);
 
   useEffect(() => {
     const handleClick = () => setOpenMenu(null);
@@ -93,7 +95,7 @@ function TrailerList({ onSelect, onCreate, refreshTrigger }) {
             {filtered.length} / {trailers.length} traileria
           </div>
         </div>
-        <button onClick={onCreate} style={{
+        <button onClick={() => navigate('/trailers/new')} style={{
           background: "#f97316", color: "#fff", border: "none",
           padding: "10px 20px", borderRadius: "8px", cursor: "pointer",
           fontWeight: "600", fontSize: "14px"
@@ -139,7 +141,7 @@ function TrailerList({ onSelect, onCreate, refreshTrigger }) {
             </thead>
             <tbody>
               {filtered.map(t => (
-                <tr key={t.id} onClick={() => onSelect(t.id)}>
+                <tr key={t.id} onClick={() => navigate(`/trailers/${t.id}/edit`)}>
                   <td style={{ color: "#f97316", fontWeight: "600" }}>{t.plate_number}</td>
                   <td style={{ color: "#cbd5e1" }}>{t.identifier || "—"}</td>
                   <td><span className="tag">{t.trailer_type}</span></td>
@@ -172,7 +174,7 @@ function TrailerList({ onSelect, onCreate, refreshTrigger }) {
           boxShadow: "0 8px 24px rgba(0,0,0,0.5)", zIndex: 9999,
           minWidth: "160px", overflow: "hidden"
         }}>
-          <button onClick={() => { setOpenMenu(null); onSelect(openMenu); }} style={menuItemStyle}>✏️ Muokkaa</button>
+          <button onClick={() => { setOpenMenu(null); navigate(`/trailers/${openMenu}/edit`); }} style={menuItemStyle}>✏️ Muokkaa</button>
           <button onClick={e => handleDelete(openMenu, e)} style={{ ...menuItemStyle, color: "#fca5a5" }}>🗑️ Poista</button>
         </div>
       )}

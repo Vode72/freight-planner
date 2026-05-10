@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import DatePickerField from "./DatePickerField";
 import { useToast } from '../hooks/useToast';
 
@@ -10,7 +11,9 @@ const PALLET_PRESETS = {
   "Muu": { width: "", length: "" }
 };
 
-function OrderForm({ orderId, onSave, onCancel }) {
+function OrderForm() {
+  const { id: orderId } = useParams();
+  const navigate = useNavigate();
   const [form, setForm] = useState({
     order_reference: "",
     pickup_reference: "",
@@ -130,7 +133,7 @@ function OrderForm({ orderId, onSave, onCancel }) {
         ? `Tilaus ${form.order_reference} päivitetty`
         : `Tilaus ${form.order_reference} luotu`
       );
-      onSave();
+      navigate('/orders');
     } catch {
       toast.error("Tilauksen tallennus epäonnistui");
       setError("Tallennus epäonnistui.");
@@ -294,7 +297,7 @@ function OrderForm({ orderId, onSave, onCancel }) {
         </h2>
         <div style={{ display: "flex", gap: "8px" }}>
           <button
-            onClick={onCancel}
+            onClick={() => navigate('/orders')}
             style={{
               background: "transparent",
               color: "#94a3b8",

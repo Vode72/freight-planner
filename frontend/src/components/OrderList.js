@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { useNavigate, useOutletContext } from "react-router-dom";
 import { useToast } from '../hooks/useToast';
 
 const STATUS_COLORS = {
@@ -6,7 +7,9 @@ const STATUS_COLORS = {
   "Tripillä": "#22c55e"
 };
 
-function OrderList({ onSelect, onCreate, refreshTrigger, onAddToTrip }) {
+function OrderList() {
+  const navigate = useNavigate();
+  const { setAddToTripOrder, refreshKey } = useOutletContext() || {};
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -16,10 +19,17 @@ function OrderList({ onSelect, onCreate, refreshTrigger, onAddToTrip }) {
   const [openMenu, setOpenMenu] = useState(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
   const toast = useToast();
+  const scrollKey = "tms-orderlist-scroll";
+
+  useEffect(() => {
+    const saved = sessionStorage.getItem(scrollKey);
+    if (saved) window.scrollTo(0, parseInt(saved, 10));
+    return () => sessionStorage.setItem(scrollKey, String(Math.round(window.scrollY)));
+  }, []);
 
   useEffect(() => {
     fetchOrders();
-  }, [refreshTrigger]);
+  }, [refreshKey]);
 
   useEffect(() => {
     const handleClick = () => setOpenMenu(null);
@@ -154,7 +164,7 @@ function OrderList({ onSelect, onCreate, refreshTrigger, onAddToTrip }) {
           </div>
         </div>
         <button
-          onClick={onCreate}
+          onClick={() => navigate('/orders/new')}
           style={{
             background: "#f97316",
             color: "#fff",
@@ -259,7 +269,7 @@ function OrderList({ onSelect, onCreate, refreshTrigger, onAddToTrip }) {
             </thead>
             <tbody>
               {filteredOrders.map(o => (
-                <tr key={o.id} onClick={() => onSelect(o.id)}>
+                <tr key={o.id} onClick={() => navigate(`/orders/${o.id}/edit`)}>
                   <td style={{ color: "#f97316", fontWeight: "600" }}>
                     {o.order_id}
                   </td>
@@ -333,7 +343,7 @@ function OrderList({ onSelect, onCreate, refreshTrigger, onAddToTrip }) {
           <button
             onClick={() => {
               setOpenMenu(null);
-              onSelect(openMenu);
+              navigate(`/orders/${openMenu}/edit`);
             }}
             style={menuItemStyle}
           >
@@ -350,7 +360,7 @@ function OrderList({ onSelect, onCreate, refreshTrigger, onAddToTrip }) {
               onClick={() => {
                 const order = orders.find(o => o.id === openMenu);
                 setOpenMenu(null);
-                onAddToTrip(order);
+                setAddToTripOrder && setAddToTripOrder(order);
               }}
               style={{ ...menuItemStyle, color: "#22c55e" }}
             >

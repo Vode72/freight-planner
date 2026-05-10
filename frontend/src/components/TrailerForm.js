@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { useToast } from '../hooks/useToast';
 
 const TRAILER_TYPES = ["Umpikaappi", "Sivuaukeava", "Umpikaappi 2-koneinen", "Pressutrailer", "Megatrailer"];
 const STATUSES = ["Vapaa", "Käytössä", "Huollossa"];
 
-function TrailerForm({ trailerId, onSave, onCancel }) {
+function TrailerForm() {
+  const { id: trailerId } = useParams();
+  const navigate = useNavigate();
   const [form, setForm] = useState({
     plate_number: "", identifier: "", trailer_type: "Umpikaappi",
     leasing_company: "TIP Trailer Services", leasing_rate: "", rental_rate: "", status: "Vapaa"
@@ -45,7 +48,7 @@ function TrailerForm({ trailerId, onSave, onCancel }) {
       });
       if (!res.ok) throw new Error();
       toast.success(trailerId ? `Traileri ${form.plate_number} päivitetty` : `Traileri ${form.plate_number} luotu`);
-      onSave();
+      navigate('/trailers');
     } catch {
       toast.error("Tallennus epäonnistui");
       setError("Tallennus epäonnistui.");
@@ -80,7 +83,7 @@ function TrailerForm({ trailerId, onSave, onCancel }) {
         <h1 style={{ color: "#f1f5f9", margin: 0, fontSize: "24px" }}>
           {trailerId ? "Muokkaa traileria" : "Uusi traileri"}
         </h1>
-        <button onClick={onCancel} style={{
+        <button onClick={() => navigate('/trailers')} style={{
           background: "transparent", color: "#94a3b8", border: "1px solid #334155",
           padding: "8px 16px", borderRadius: "8px", cursor: "pointer", fontSize: "13px"
         }}>← Takaisin</button>
@@ -144,7 +147,7 @@ function TrailerForm({ trailerId, onSave, onCancel }) {
           }}>
             {saving ? "Tallennetaan..." : trailerId ? "Tallenna muutokset" : "Luo traileri"}
           </button>
-          <button type="button" onClick={onCancel} style={{
+          <button type="button" onClick={() => navigate('/trailers')} style={{
             background: "transparent", color: "#94a3b8", border: "1px solid #334155",
             padding: "12px 20px", borderRadius: "8px", cursor: "pointer", fontSize: "14px"
           }}>Peruuta</button>

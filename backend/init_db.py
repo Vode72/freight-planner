@@ -11,6 +11,7 @@ cursor.execute("DROP TABLE IF EXISTS trips")
 cursor.execute("DROP TABLE IF EXISTS trailers")
 cursor.execute("DROP TABLE IF EXISTS carriers")
 cursor.execute("DROP TABLE IF EXISTS customers")
+cursor.execute("DROP TABLE IF EXISTS fuel_rates")
 
 # Trips taulu
 cursor.execute("""
@@ -233,6 +234,28 @@ CREATE TABLE IF NOT EXISTS customers (
     notes TEXT
 )
 """)
+
+# Fuel rates taulu
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS fuel_rates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    valid_from TEXT NOT NULL,
+    valid_to TEXT NOT NULL,
+    multiplier REAL NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+fuel_rates_demo = [
+    ("2026-01-01", "2026-01-31", 1.15),
+    ("2026-02-01", "2026-02-28", 1.16),
+    ("2026-03-01", "2026-03-31", 1.18),
+    ("2026-04-01", "2026-04-30", 1.17),
+    ("2026-05-01", "2026-05-31", 1.19),
+]
+cursor.executemany("""
+    INSERT INTO fuel_rates (valid_from, valid_to, multiplier) VALUES (?, ?, ?)
+""", fuel_rates_demo)
 
 # Lisätään asiakkaat
 customers = [

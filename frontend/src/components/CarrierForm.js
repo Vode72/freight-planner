@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { useToast } from '../hooks/useToast';
 
 const COUNTRIES = ["FI","SE","NO","DK","DE","NL","BE","FR","PL","EE","LV","LT","AT","CH","IT","ES","PT","GB","LU","CZ","SK","HU","PL"];
 
-function CarrierForm({ carrierId, onSave, onCancel }) {
+function CarrierForm() {
+  const { id: carrierId } = useParams();
+  const navigate = useNavigate();
   const [form, setForm] = useState({
     name: "", country: "FI", city: "", business_id: "", contact_person: "", phone: ""
   });
@@ -43,7 +46,7 @@ function CarrierForm({ carrierId, onSave, onCancel }) {
       });
       if (!res.ok) throw new Error();
       toast.success(carrierId ? `${form.name} päivitetty` : `${form.name} luotu`);
-      onSave();
+      navigate('/carriers');
     } catch {
       toast.error("Tallennus epäonnistui");
       setError("Tallennus epäonnistui.");
@@ -80,7 +83,7 @@ function CarrierForm({ carrierId, onSave, onCancel }) {
             {carrierId ? "Muokkaa kuljetusyhtiötä" : "Uusi kuljetusyhtiö"}
           </h1>
         </div>
-        <button onClick={onCancel} style={{
+        <button onClick={() => navigate('/carriers')} style={{
           background: "transparent", color: "#94a3b8", border: "1px solid #334155",
           padding: "8px 16px", borderRadius: "8px", cursor: "pointer", fontSize: "13px"
         }}>← Takaisin</button>
@@ -133,7 +136,7 @@ function CarrierForm({ carrierId, onSave, onCancel }) {
           }}>
             {saving ? "Tallennetaan..." : carrierId ? "Tallenna muutokset" : "Luo kuljetusyhtiö"}
           </button>
-          <button type="button" onClick={onCancel} style={{
+          <button type="button" onClick={() => navigate('/carriers')} style={{
             background: "transparent", color: "#94a3b8", border: "1px solid #334155",
             padding: "12px 20px", borderRadius: "8px", cursor: "pointer", fontSize: "14px"
           }}>Peruuta</button>

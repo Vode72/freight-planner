@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useToast } from '../hooks/useToast';
 
-function CustomerList({ onSelect, onCreate, refreshTrigger }) {
+function CustomerList() {
+  const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -14,7 +16,7 @@ function CustomerList({ onSelect, onCreate, refreshTrigger }) {
 
   useEffect(() => {
     fetchCustomers();
-  }, [refreshTrigger]);
+  }, []);
 
   useEffect(() => {
     const handleClick = () => setOpenMenu(null);
@@ -135,7 +137,7 @@ function CustomerList({ onSelect, onCreate, refreshTrigger }) {
           </div>
         </div>
         <button
-          onClick={onCreate}
+          onClick={() => navigate('/customers/new')}
           style={{
             background: "#f97316",
             color: "#fff",
@@ -238,7 +240,7 @@ function CustomerList({ onSelect, onCreate, refreshTrigger }) {
             </thead>
             <tbody>
               {filteredCustomers.map(c => (
-                <tr key={c.id} onClick={() => onSelect(c.id)}>
+                <tr key={c.id} onClick={() => navigate(`/customers/${c.id}/edit`)}>
                   <td>
                     <div style={{ color: "#f1f5f9", fontWeight: "600" }}>{c.name}</div>
                     {c.business_id && (
@@ -305,7 +307,7 @@ function CustomerList({ onSelect, onCreate, refreshTrigger }) {
           <button
             onClick={() => {
               setOpenMenu(null);
-              onSelect(openMenu);
+              navigate(`/customers/${openMenu}/edit`);
             }}
             style={menuItemStyle}
           >
