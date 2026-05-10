@@ -105,7 +105,7 @@ function CustomerList() {
       return 0;
     });
     return result;
-  }, [customers, search, sortKey, sortDir]);
+  }, [customers, search, typeFilter, sortKey, sortDir]);
 
   const handleSort = (key) => {
     if (sortKey === key) {
