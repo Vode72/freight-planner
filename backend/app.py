@@ -13,25 +13,34 @@ TRAILER_SPECS = {
         "side_loading": False,
         "temperature_controlled": True,
         "dual_zone": False,
-        "max_weight": 23500,
+        "max_weight": 24000,
         "max_loading_meters": 13.6,
-        "max_volume": 90
+        "max_volume": 85,
+        "height": 2.5,
+        "pallets_eur": 33,
+        "loading_options": ["takaa"]
     },
     "Sivuaukeava": {
         "side_loading": True,
         "temperature_controlled": True,
         "dual_zone": False,
-        "max_weight": 23500,
+        "max_weight": 24000,
         "max_loading_meters": 13.6,
-        "max_volume": 90
+        "max_volume": 91,
+        "height": 3.0,
+        "pallets_eur": 33,
+        "loading_options": ["sivusta", "takaa"]
     },
     "Umpikaappi 2-koneinen": {
         "side_loading": False,
         "temperature_controlled": True,
         "dual_zone": True,
-        "max_weight": 23500,
+        "max_weight": 23000,
         "max_loading_meters": 13.6,
-        "max_volume": 90
+        "max_volume": 85,
+        "height": 2.5,
+        "pallets_eur": 33,
+        "loading_options": ["takaa"]
     },
     "Pressutrailer": {
         "side_loading": True,
@@ -39,7 +48,11 @@ TRAILER_SPECS = {
         "dual_zone": False,
         "max_weight": 24000,
         "max_loading_meters": 13.6,
-        "max_volume": 90
+        "max_volume": 85,
+        "height": 2.5,
+        "pallets_eur": 33,
+        "pallets_fin": 26,
+        "loading_options": ["sivusta", "takaa"]
     },
     "Megatrailer": {
         "side_loading": True,
@@ -47,7 +60,10 @@ TRAILER_SPECS = {
         "dual_zone": False,
         "max_weight": 24000,
         "max_loading_meters": 13.6,
-        "max_volume": 100
+        "max_volume": 100,
+        "height": 3.0,
+        "pallets_eur": 33,
+        "loading_options": ["sivusta", "takaa"]
     }
 }
 
@@ -107,6 +123,20 @@ def get_db_connection():
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def migrate_db():
+    conn = get_db_connection()
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(trips)").fetchall()}
+    fec_cols = ["loading_started_at", "loading_completed_at",
+                "delivery_started_at", "delivery_completed_at", "delivered_at"]
+    for col in fec_cols:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE trips ADD COLUMN {col} TEXT")
+    conn.commit()
+    conn.close()
+
+migrate_db()
 
 
 def calculate_loading_meters(width, length, quantity):
@@ -1562,6 +1592,90 @@ def get_costs_dashboard():
         "trips":      trip_list,
         "categories": categories,
     })
+
+
+# ── FEC — kuljettajan kuittaussivu ───────────────────────────────────────────
+
+@app.route("/api/driver/<trip_id_str>", methods=["GET"])
+def driver_get_trip(trip_id_str):
+    conn = get_db_connection()
+    trip = conn.execute("""
+        SELECT t.*, c.name AS carrier_name,
+               tr.plate_number, tr.identifier, tr.trailer_type AS trailer_type_name
+        FROM trips t
+        LEFT JOIN carriers c ON t.carrier_id = c.id
+        LEFT JOIN trailers tr ON t.trailer_id = tr.id
+        WHERE t.trip_id = ?
+    """, (trip_id_str,)).fetchone()
+    if not trip:
+        conn.close()
+        return jsonify({"error": "Trippiä ei löydy"}), 404
+
+    orders = conn.execute("""
+        SELECT order_id, goods_description, quantity, pallet_type,
+               loading_meters, weight,
+               loading_point_city, loading_point_country,
+               unloading_point_city, unloading_point_country,
+               consignor_name, consignee_name, loading_instructions
+        FROM orders WHERE trip_id = ? ORDER BY id
+    """, (trip["id"],)).fetchall()
+    conn.close()
+
+    return jsonify({
+        "trip": dict(trip),
+        "orders": [dict(o) for o in orders],
+    })
+
+
+@app.route("/api/driver/<trip_id_str>/checkin", methods=["POST"])
+def driver_checkin(trip_id_str):
+    data = request.get_json()
+    action = data.get("action")  # loading_started | loading_completed | delivery_started | delivery_completed
+
+    allowed = {"loading_started", "loading_completed", "delivery_started", "delivery_completed"}
+    if action not in allowed:
+        return jsonify({"error": "Virheellinen toiminto"}), 400
+
+    col = f"{action}_at"
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+
+    conn = get_db_connection()
+    trip = conn.execute("SELECT * FROM trips WHERE trip_id = ?", (trip_id_str,)).fetchone()
+    if not trip:
+        conn.close()
+        return jsonify({"error": "Trippiä ei löydy"}), 404
+
+    if trip[col]:
+        conn.close()
+        return jsonify({"error": "Toiminto on jo kuitattu"}), 409
+
+    conn.execute(f"UPDATE trips SET {col} = ? WHERE trip_id = ?", (now, trip_id_str))
+
+    # Automaatti 1: odotusaika (koodi 800)
+    # Jos lastaus alkoi myöhemmin kuin loading_time_end → lisää odotusaikakulu
+    if action == "loading_started" and trip["loading_time_end"]:
+        try:
+            base = trip["loading_date"] or now[:10]
+            window_end = datetime.strptime(f"{base}T{trip['loading_time_end']}", "%Y-%m-%dT%H:%M")
+            actual_start = datetime.strptime(now, "%Y-%m-%dT%H:%M:%S")
+            delay_h = (actual_start - window_end).total_seconds() / 3600
+            if delay_h > 0.5:
+                conn.execute("""
+                    INSERT INTO costs (trip_id, cost_code, description, amount, cost_type)
+                    VALUES (?, '800', 'ODOTUSAIKA (FEC-automaatti)', ?, 'cost')
+                """, (trip["id"], round(delay_h * 45, 2)))
+        except Exception:
+            pass
+
+    # Automaatti 2: delivered_at — asetetaan kun delivery_completed kuitataan
+    if action == "delivery_completed":
+        conn.execute("UPDATE trips SET delivered_at = ? WHERE trip_id = ?", (now, trip_id_str))
+
+    conn.commit()
+    updated = conn.execute("SELECT * FROM trips WHERE trip_id = ?", (trip_id_str,)).fetchone()
+    conn.close()
+
+    return jsonify({"ok": True, "trip": dict(updated)})
 
 
 if __name__ == "__main__":

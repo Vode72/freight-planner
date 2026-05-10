@@ -216,7 +216,36 @@ KULUKOODIT: 100(SPOT), 120(FREIGHT), 200(POLTTOAINELISÄ),
 KAPASITEETTITYYPIT:
 - Thermo: Umpikaappi, Sivuaukeava, Umpikaappi 2-koneinen
 - Standard: Pressutrailer, Megatrailer
-- Max LDM: 13,6m | Max paino: 24 000kg
+- Max LDM: 13,6m (kaikki tyypit)
+- Max paino: 24 000kg (Umpikaappi / Sivuaukeava / Pressutrailer / Megatrailer)
+             23 000kg (Umpikaappi 2-koneinen — koneiden lisäpaino)
+- Tilavuus:  85 m³ (Umpikaappi / Pressutrailer / Umpikaappi 2-koneinen)
+             91 m³ (Sivuaukeava)
+            100 m³ (Megatrailer)
+
+TRAILER-SPEKSIT (EU-standardit):
+  Pressutrailer (Curtainsider):
+    LDM: 13,6m | Max paino: 24 000kg | Tilavuus: 85 m³ | Korkeus: 2,5m
+    Palletit: 33 EUR / 26 FIN | Lastaus: sivusta, takaa
+
+  Megatrailer (Mega Curtainsider):
+    LDM: 13,6m | Max paino: 24 000kg | Tilavuus: 100 m³ | Korkeus: 3,0m
+    Palletit: 33 EUR | Lastaus: sivusta, takaa
+    Etu: volyymilasteille enemmän tilaa
+
+  Umpikaappi (Box trailer):
+    LDM: 13,6m | Max paino: 24 000kg | Tilavuus: 85 m³ | Korkeus: 2,5m
+    Palletit: 33 EUR | Lastaus: takaa, korkea turvallisuus
+
+  Umpikaappi 2-koneinen (Multi-temp reefer):
+    LDM: 13,6m | Max paino: 23 000kg | Tilavuus: 85 m³ | Korkeus: 2,5m
+    Palletit: 33 EUR | Lastaus: takaa
+    Kaksi lämpötilalohkoa — eri lämpötilat samassa kuormassa
+
+  Sivuaukeava (Curtainsider high):
+    LDM: 13,6m | Max paino: 24 000kg | Tilavuus: 91 m³ | Korkeus: 3,0m
+    Palletit: 33 EUR | Lastaus: sivusta, takaa
+    Helppo trukkilastaus sivusta
 
 REITTIMATCH-LOGIIKKA: good ✅ / warning ⚠️ / bad ❌
 - Sama maa + sama postialue → good
