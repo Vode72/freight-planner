@@ -305,6 +305,102 @@ RAKENNUSJÄRJESTYS:
    7. Power BI API-endpointit
 
 ============================================================
+HALLINTA-OSIO — UUSI RAKENNE (välilehdet)
+============================================================
+
+Sidebar tiivistyy kolmeen linkkiin:
+
+HALLINTA
+──────────
+🚛 Kalusto & Kumppanit  → /hallinta/kalusto
+💼 Hinnoittelu          → /hallinta/hinnoittelu
+⚙️ Asetukset            → /hallinta/asetukset
+
+KALUSTO & KUMPPANIT — /hallinta/kalusto
+  Välilehdet: 🏢 Kuljetusyhtiöt | 🚐 Trailerit | 👤 Vetäjät
+  Yhdistää nykyiset CarrierList, TrailerList + trucks inlinenä
+
+HINNOITTELU — /hallinta/hinnoittelu
+  Välilehdet: ⛽ Polttoaine | 🛣️ Kilometrit | ⛴️ Lautat
+  Polttoaine: FuelRateManager (jo valmis) → siirretään tänne
+  Kilometrit: km_rates-taulu
+    domestic_rate (€/km, koodi 210)
+    continent_rate (€/km, koodi 220)
+    valid_from, valid_to
+  Lautat: ferry_rates-taulu (nykyinen kovakoodaus → tietokantaan)
+    route, price, valid_from, valid_to
+  Automaatit:
+    Trip + km syötetään → kotimaan/mantereen ajo automaattisesti
+    Trip vahvistetaan + lauttareitti → lauttakulu (500) automaattisesti
+
+ASETUKSET — /hallinta/asetukset
+  Välilehdet: 🎨 Teema | 🔔 Ilmoitukset | 🏢 Oma yritys | 👤 Käyttäjät
+  Teema: 6 kombinaatiota (Dark/Light/Corporate × Terävä/Pyöreä)
+  Ilmoitukset: kynnysarvot hälytyksille
+  Oma yritys: forwarder_name, address, contact (käytetään dokumenteissa)
+  Käyttäjät: myöhemmin (multiuser)
+
+Kaikki hallintasivut: URL-parametri välilehdille
+  /hallinta/hinnoittelu?tab=lautat
+  /hallinta/kalusto?tab=trailerit
+
+============================================================
+BREADCRUMB-NAVIGAATIO
+============================================================
+
+Jokaisella sivulla ylhäällä kontekstuaalinen polku:
+  📊 > 🚛 Keikkalista > TRP-2026-004 > Kustannukset
+  📊 > 📦 Orderit > ORD-2026-007
+  📊 > 💼 Hinnoittelu > Lauttahinnat
+
+Toteutus: React Router + useLocation()
+Klikattavissa — pääsee mihin tahansa tasoon suoraan
+
+============================================================
+FREIGHT PLANNER VS SAP — KILPAILUEDUT
+============================================================
+
+1. REAALIAIKAINEN DATA
+   - Live-indikaattori "● Päivitetty 13:42"
+   - Ei F5-päivitystä
+
+2. KONTEKSTUAALINEN ÄLY — Dashboard-hälytykset
+   🔴 VAATII TOIMENPITEITÄ (heti etusivulla näkyvissä)
+      - Trip jonka lauttabooking puuttuu + lähtöaika lähestyy
+      - Trailer seisonut yli X päivää
+   ⚠️ TARKISTA
+      - Ylikuormattu trip (paino/LDM yli 100%)
+      - Trip ilman myyntirivejä
+   💡 SUOSITUKSET
+      - Seuraavaan keikkaan suositeltu trailer (vanhin seisoja)
+      - Vapaat orderit sopivalle reitille
+
+3. MODERNI UX
+   - Inline-muokkaus (ei erillistä muokkaussivua)
+   - Ctrl+K globaali pikahaku
+   - Drag & drop dashboard
+   - Hover-toiminnot
+
+4. VISUAALINEN DATA
+   - Kapasiteettipalkit värikoodattuina
+   - Kulujakauma visuaalisesti
+   - Timeline/Gantt-näkymä
+   - Statusvärit Trip-listassa
+
+5. PERSONOINTI
+   - 6 teemaa (Dark/Light/Corporate × Terävä/Pyöreä)
+   - Omat pikavalinnat
+   - Sarakevalinta taulukoihin
+
+6. MOBIILIYSTÄVÄLLINEN
+   - Responsiivinen → toimii tabletilla
+   - FEC-kuittaussivu toimii puhelimella
+
+7. NOPEUS
+   - React SPA → välitön navigointi
+   - Ei sivulatausta välilehtien välillä
+
+============================================================
 VISUAALINEN KEHITYS — SUUNNITELMA
 ============================================================
 
@@ -376,15 +472,22 @@ DASHBOARD DRAG & DROP:
   Tallennetaan localStorage
 
 RAKENNUSJÄRJESTYS (visuaalinen paketti):
-  1. Statusvärit Trip-listassa (nopein, iso hyöty)
+  1. Statusvärit Trip-listassa
   2. Kapasiteettipalkit värikoodattuina
-  3. Teemat (Dark/Light/Corporate × Terävä/Pyöreä)
-  4. Globaali pikahaku Ctrl+K
-  5. Ilmoituspaneeli 🔔
-  6. Animaatiot + loading-skeleton
-  7. Timeline/Gantt
-  8. Karttanäkymä
-  9. Dashboard drag & drop
+  3. Breadcrumb-navigaatio
+  4. Hallinta-osio uudelleenrakennus
+     (Kalusto & Kumppanit / Hinnoittelu / Asetukset)
+  5. Hinnoittelu-sivu (km_rates + ferry_rates tietokantaan)
+  6. Teemat (Dark/Light/Corporate × Terävä/Pyöreä)
+  7. Globaali pikahaku Ctrl+K
+  8. Dashboard kontekstuaalinen äly (hälytykset + suositukset)
+  9. Ilmoituspaneeli 🔔
+  10. Animaatiot + loading-skeleton
+  11. Viimeisimmät kohteet -historia
+  12. Sarakevalinta taulukoihin
+  13. Timeline/Gantt
+  14. Karttanäkymä
+  15. Dashboard drag & drop
 
 ============================================================
 POWER BI — API-INTEGRAATIO
