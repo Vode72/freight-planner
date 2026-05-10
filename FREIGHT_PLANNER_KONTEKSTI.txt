@@ -29,12 +29,11 @@ trips:
   ferry_route, ferry_departure, ferry_arrival,
   adr, tail_lift, temperature_controlled,
   loading_instructions, notes
-  ── TULOSSA ──
-  loading_started_at    (FEC-kuittaus)
-  loading_completed_at  (FEC-kuittaus)
-  delivery_started_at   (FEC-kuittaus)
-  delivery_completed_at (FEC-kuittaus)
-  delivered_at          (OTD-laskenta, asetetaan kun status → Toimitettu)
+  loading_started_at    ✅ (FEC-kuittaus)
+  loading_completed_at  ✅ (FEC-kuittaus)
+  delivery_started_at   ✅ (FEC-kuittaus)
+  delivery_completed_at ✅ (FEC-kuittaus)
+  delivered_at          ✅ (OTD-laskenta, asetetaan kun delivery_completed)
 
 orders:
   order_id (ORD-2026-001), trip_id, status (Vapaa/Tripillä),
@@ -131,6 +130,11 @@ TrailerForm.js    — ✅ trailerin luonti/muokkaus
 FuelRateManager.js— ✅ polttoainekertoimien hallinta (Hallinta-osio, /fuel)
                     kuukausittaiset kertoimet, voimassa/vanhentunut/tuleva status
                     kuluvan päivän kerroin korostettuna + esimerkkisumma
+DriverPage.js     — ✅ FEC-kuittaussivu (mobiilioptimoitu, max 480px)
+                    julkinen reitti /driver/:trip_id — ei kirjautumista
+                    4 painiketta: Lastaus alkanut / valmis / Purku alkanut / valmis
+                    automaatti: loading_started >30 min myöhässä → kulu 800 (45€/h)
+                    automaatti: delivery_completed → delivered_at asetetaan (OTD)
 CostsDashboard.js — ✅ Costs Dashboard (💸 Työkalut-osiossa sidebarissa)
                     4 KPI-korttia (Myynti / Ostot / Kate€ / Kate%)
                     aikavälisuodatin (viikko/kuukausi/kvartaali/vuosi/custom)
@@ -170,6 +174,10 @@ Fuel:       GET/POST /api/fuel-rates
             PUT /api/fuel-rates/:id
             DELETE /api/fuel-rates/:id
 Dashboard:  GET /api/costs-dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD
+Driver:     GET /api/driver/:trip_id        — kuljettajan näkymä (julkinen)
+            POST /api/driver/:trip_id/checkin — kuittaus (4 vaihetta)
+              automaatti: odotusaika (800) jos loading_started myöhässä >30min
+              automaatti: delivered_at asetetaan delivery_completed-kuittauksella
 
 ============================================================
 VALMIIT KOKONAISUUDET
@@ -188,6 +196,7 @@ VALMIIT KOKONAISUUDET
 ✅ 9. Polttoainekerroin-hallinta (FuelRateManager, fuel_rates-taulu, API)
 ✅ 10. TripDetail Kustannukset uusiksi (ryhmittely, 4 korttia, inline-muokkaus,
         lauttakulu per order, FREIGHT→POLTTOAINELISÄ automaatti)
+✅ 11. FEC-kuittaussivu (DriverPage, /driver/:trip_id, mobiili, 2 automaattia)
 ✅ 11. Costs Dashboard (💸 /costs-dashboard, KPI-kortit, aikavälisuodatin,
         trip-taulukko, kulujakauma kategorioittain)
 
@@ -331,8 +340,8 @@ RAKENNUSJÄRJESTYS:
 ✅ 2. Polttoainekerroin-hallinta (⛽ FuelRateManager + API)
 ✅ 3. TripDetailin Kustannukset-välilehti uusiksi (ryhmittely, inline-muokkaus)
 ✅ 4. Costs Dashboard (CostsDashboard + /api/costs-dashboard)
-→  5. FEC-kuittaussivu + automaatiot (SEURAAVA)
-   6. Raportit-näkymä
+✅ 5. FEC-kuittaussivu + automaatiot (DriverPage + checkin-endpoint)
+→  6. Raportit-näkymä (SEURAAVA)
    7. Power BI API-endpointit
 
 ============================================================
@@ -617,7 +626,7 @@ GIT-Tilanne
 ============================================================
 GitHub: github.com/Vode72/freight-planner
 .gitignore: node_modules/ ja freight.db jätetään pois
-Viimeisin commit: React Router v7 + Costs Dashboard
+Viimeisin commit: FEC-kuittaussivu + tietokantamigraatio + OTD-automaatti
 
 ============================================================
 --- MYÖHEMMIN ---
