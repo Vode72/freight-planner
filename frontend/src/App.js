@@ -17,6 +17,11 @@ import TrailerList from "./components/TrailerList";
 import TrailerForm from "./components/TrailerForm";
 import FuelRateManager from "./components/FuelRateManager";
 import CostsDashboard from "./components/CostsDashboard";
+import CountryRestrictionsPage from "./components/CountryRestrictionsPage";
+import HallintaKalusto from "./components/HallintaKalusto";
+import HallintaHinnoittelu from "./components/HallintaHinnoittelu";
+import HallintaAsetukset from "./components/HallintaAsetukset";
+import DriverPage from "./components/DriverPage";
 import { ToastProvider } from './context/ToastContext';
 import ToastContainer from './components/ToastContainer';
 
@@ -87,9 +92,9 @@ function Layout({ setIsLoggedIn }) {
           <SidebarLink to="/customers" icon="👥" label="Asiakkaat" />
 
           <SectionHeader label="Hallinta" />
-          <SidebarLink to="/carriers" icon="🏢" label="Kuljetusyhtiöt" />
-          <SidebarLink to="/trailers" icon="🚐" label="Trailerit" />
-          <SidebarLink to="/fuel" icon="⛽" label="Polttoainekerroin" />
+          <SidebarLink to="/hallinta/kalusto" icon="🚛" label="Kalusto & Kumppanit" />
+          <SidebarLink to="/hallinta/hinnoittelu" icon="💼" label="Hinnoittelu" />
+          <SidebarLink to="/hallinta/asetukset" icon="⚙️" label="Asetukset" />
 
           <SectionHeader label="Työkalut" />
           <SidebarLink to="/calculator" icon="💰" label="Katelaskin" />
@@ -152,50 +157,57 @@ function App() {
   return (
     <ToastProvider>
       <BrowserRouter>
-        {!isLoggedIn ? (
-          <Login onLogin={() => setIsLoggedIn(true)} />
-        ) : (
-          <Routes>
-            <Route path="/" element={<Layout setIsLoggedIn={setIsLoggedIn} />}>
-              <Route index element={<Navigate to="/dashboard" replace />} />
-              <Route path="dashboard" element={<Dashboard />} />
+        <Routes>
+          {/* Julkinen reitti — ei vaadi kirjautumista */}
+          <Route path="/driver/:trip_id" element={<DriverPage />} />
 
-              {/* Trips */}
-              <Route path="trips" element={<TripList />} />
-              <Route path="trips/new" element={<TripForm />} />
-              <Route path="trips/:id">
-                <Route index element={<Navigate to="orders" replace />} />
-                <Route path="edit" element={<TripForm />} />
-                <Route path=":tab" element={<TripDetail />} />
-              </Route>
+          {/* Kaikki muut: kirjautumislogiikka */}
+          <Route path="*" element={
+            !isLoggedIn ? (
+              <Login onLogin={() => setIsLoggedIn(true)} />
+            ) : (
+              <Routes>
+                <Route path="/" element={<Layout setIsLoggedIn={setIsLoggedIn} />}>
+                  <Route index element={<Navigate to="/dashboard" replace />} />
+                  <Route path="dashboard" element={<Dashboard />} />
 
-              {/* Orders */}
-              <Route path="orders" element={<OrderList />} />
-              <Route path="orders/new" element={<OrderForm />} />
-              <Route path="orders/:id/edit" element={<OrderForm />} />
+                  <Route path="trips" element={<TripList />} />
+                  <Route path="trips/new" element={<TripForm />} />
+                  <Route path="trips/:id">
+                    <Route index element={<Navigate to="orders" replace />} />
+                    <Route path="edit" element={<TripForm />} />
+                    <Route path=":tab" element={<TripDetail />} />
+                  </Route>
 
-              {/* Customers */}
-              <Route path="customers" element={<CustomerList />} />
-              <Route path="customers/new" element={<CustomerForm />} />
-              <Route path="customers/:id/edit" element={<CustomerForm />} />
+                  <Route path="orders" element={<OrderList />} />
+                  <Route path="orders/new" element={<OrderForm />} />
+                  <Route path="orders/:id/edit" element={<OrderForm />} />
 
-              {/* Carriers */}
-              <Route path="carriers" element={<CarrierList />} />
-              <Route path="carriers/new" element={<CarrierForm />} />
-              <Route path="carriers/:id/edit" element={<CarrierForm />} />
+                  <Route path="customers" element={<CustomerList />} />
+                  <Route path="customers/new" element={<CustomerForm />} />
+                  <Route path="customers/:id/edit" element={<CustomerForm />} />
 
-              {/* Trailers */}
-              <Route path="trailers" element={<TrailerList />} />
-              <Route path="trailers/new" element={<TrailerForm />} />
-              <Route path="trailers/:id/edit" element={<TrailerForm />} />
+                  <Route path="carriers" element={<CarrierList />} />
+                  <Route path="carriers/new" element={<CarrierForm />} />
+                  <Route path="carriers/:id/edit" element={<CarrierForm />} />
 
-              <Route path="fuel" element={<FuelRateManager />} />
-              <Route path="calculator" element={<CostCalculator />} />
-              <Route path="costs-dashboard" element={<CostsDashboard />} />
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Route>
-          </Routes>
-        )}
+                  <Route path="trailers" element={<TrailerList />} />
+                  <Route path="trailers/new" element={<TrailerForm />} />
+                  <Route path="trailers/:id/edit" element={<TrailerForm />} />
+
+                  <Route path="fuel" element={<FuelRateManager />} />
+                  <Route path="restrictions" element={<CountryRestrictionsPage />} />
+                  <Route path="hallinta/kalusto" element={<HallintaKalusto />} />
+                  <Route path="hallinta/hinnoittelu" element={<HallintaHinnoittelu />} />
+                  <Route path="hallinta/asetukset" element={<HallintaAsetukset />} />
+                  <Route path="calculator" element={<CostCalculator />} />
+                  <Route path="costs-dashboard" element={<CostsDashboard />} />
+                  <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                </Route>
+              </Routes>
+            )
+          } />
+        </Routes>
       </BrowserRouter>
       <ToastContainer />
     </ToastProvider>

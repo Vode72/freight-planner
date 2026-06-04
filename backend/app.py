@@ -1678,5 +1678,449 @@ def driver_checkin(trip_id_str):
     return jsonify({"ok": True, "trip": dict(updated)})
 
 
+# ===== COUNTRY RESTRICTIONS =====
+
+@app.route("/api/country-restrictions", methods=["GET"])
+def get_country_restrictions():
+    cc = request.args.get("country_code")
+    conn = get_db_connection()
+    if cc:
+        rows = conn.execute(
+            "SELECT * FROM country_restrictions WHERE country_code=? AND active=1 ORDER BY country_code, restriction_type",
+            (cc,)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM country_restrictions WHERE active=1 ORDER BY country_code, restriction_type"
+        ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/country-restrictions", methods=["POST"])
+def create_country_restriction():
+    data = request.get_json()
+    if not data or not data.get("country_code") or not data.get("restriction_type"):
+        return jsonify({"error": "country_code ja restriction_type ovat pakollisia"}), 400
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO country_restrictions
+            (country_code, restriction_type, day_of_week, date_from, date_to,
+             time_from, time_to, min_weight_t, description, severity, exemptions, active)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,1)
+    """, (
+        data.get("country_code").upper(),
+        data.get("restriction_type"),
+        data.get("day_of_week"),
+        data.get("date_from"),
+        data.get("date_to"),
+        data.get("time_from"),
+        data.get("time_to"),
+        data.get("min_weight_t", 3.5),
+        data.get("description"),
+        data.get("severity", "orange"),
+        data.get("exemptions"),
+    ))
+    new_id = cursor.lastrowid
+    conn.commit()
+    row = conn.execute("SELECT * FROM country_restrictions WHERE id=?", (new_id,)).fetchone()
+    conn.close()
+    return jsonify(dict(row)), 201
+
+
+@app.route("/api/country-restrictions/<int:rid>", methods=["PUT"])
+def update_country_restriction(rid):
+    data = request.get_json()
+    conn = get_db_connection()
+    conn.execute("""
+        UPDATE country_restrictions SET
+            country_code=?, restriction_type=?, day_of_week=?, date_from=?, date_to=?,
+            time_from=?, time_to=?, min_weight_t=?, description=?, severity=?, exemptions=?
+        WHERE id=?
+    """, (
+        data.get("country_code", "").upper(),
+        data.get("restriction_type"),
+        data.get("day_of_week"),
+        data.get("date_from"),
+        data.get("date_to"),
+        data.get("time_from"),
+        data.get("time_to"),
+        data.get("min_weight_t", 3.5),
+        data.get("description"),
+        data.get("severity", "orange"),
+        data.get("exemptions"),
+        rid,
+    ))
+    conn.commit()
+    row = conn.execute("SELECT * FROM country_restrictions WHERE id=?", (rid,)).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({"error": "Ei löydy"}), 404
+    return jsonify(dict(row))
+
+
+@app.route("/api/country-restrictions/<int:rid>", methods=["DELETE"])
+def delete_country_restriction(rid):
+    conn = get_db_connection()
+    conn.execute("UPDATE country_restrictions SET active=0 WHERE id=?", (rid,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+# ===== TERMINALS =====
+
+@app.route("/api/terminals", methods=["GET"])
+def get_terminals():
+    cc = request.args.get("country_code")
+    conn = get_db_connection()
+    if cc:
+        rows = conn.execute(
+            "SELECT * FROM terminals WHERE country_code=? AND active=1 ORDER BY city, name",
+            (cc,)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM terminals WHERE active=1 ORDER BY country_code, city, name"
+        ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/terminals", methods=["POST"])
+def create_terminal():
+    data = request.get_json()
+    if not data or not data.get("name") or not data.get("country_code"):
+        return jsonify({"error": "name ja country_code ovat pakollisia"}), 400
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO terminals (name, country_code, city, address, contact_person, phone, has_tail_lift, notes, active)
+        VALUES (?,?,?,?,?,?,?,?,1)
+    """, (
+        data.get("name"),
+        data.get("country_code").upper(),
+        data.get("city", ""),
+        data.get("address"),
+        data.get("contact_person"),
+        data.get("phone"),
+        1 if data.get("has_tail_lift", True) else 0,
+        data.get("notes"),
+    ))
+    new_id = cursor.lastrowid
+    conn.commit()
+    row = conn.execute("SELECT * FROM terminals WHERE id=?", (new_id,)).fetchone()
+    conn.close()
+    return jsonify(dict(row)), 201
+
+
+@app.route("/api/terminals/<int:tid>", methods=["PUT"])
+def update_terminal(tid):
+    data = request.get_json()
+    conn = get_db_connection()
+    conn.execute("""
+        UPDATE terminals SET name=?, country_code=?, city=?, address=?,
+            contact_person=?, phone=?, has_tail_lift=?, notes=?
+        WHERE id=?
+    """, (
+        data.get("name"),
+        data.get("country_code", "").upper(),
+        data.get("city", ""),
+        data.get("address"),
+        data.get("contact_person"),
+        data.get("phone"),
+        1 if data.get("has_tail_lift", True) else 0,
+        data.get("notes"),
+        tid,
+    ))
+    conn.commit()
+    row = conn.execute("SELECT * FROM terminals WHERE id=?", (tid,)).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({"error": "Ei löydy"}), 404
+    return jsonify(dict(row))
+
+
+@app.route("/api/terminals/<int:tid>", methods=["DELETE"])
+def delete_terminal(tid):
+    conn = get_db_connection()
+    conn.execute("UPDATE terminals SET active=0 WHERE id=?", (tid,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+# ===== CHECK RESTRICTIONS =====
+
+@app.route("/api/check-restrictions", methods=["POST"])
+def check_restrictions_api():
+    from restriction_engine import check_restrictions
+    data = request.get_json()
+    countries = data.get("countries", [])
+    departure_str = data.get("departure")
+    arrival_str = data.get("arrival")
+    weight_t = float(data.get("weight_t", 24.0))
+
+    if not countries or not departure_str or not arrival_str:
+        return jsonify({"error": "countries, departure ja arrival ovat pakollisia"}), 400
+
+    try:
+        departure_dt = datetime.strptime(departure_str, "%Y-%m-%dT%H:%M")
+        arrival_dt = datetime.strptime(arrival_str, "%Y-%m-%dT%H:%M")
+    except ValueError:
+        return jsonify({"error": "Virheellinen päivämäärämuoto (käytä YYYY-MM-DDTHH:MM)"}), 400
+
+    conn = get_db_connection()
+    result = check_restrictions(conn, countries, departure_dt, arrival_dt, weight_t)
+    conn.close()
+    return jsonify(result)
+
+
+# ===== TRAILER MAINTENANCE =====
+
+@app.route("/api/trailers/<int:tid>/maintenance", methods=["GET"])
+def get_trailer_maintenance(tid):
+    conn = get_db_connection()
+    trailer = conn.execute("SELECT plate_number FROM trailers WHERE id=?", (tid,)).fetchone()
+    if not trailer:
+        conn.close()
+        return jsonify({"error": "Traileria ei löydy"}), 404
+    rows = conn.execute(
+        "SELECT * FROM trailer_maintenance WHERE trailer_id=? ORDER BY date DESC",
+        (trailer["plate_number"],)
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/trailers/<int:tid>/maintenance", methods=["POST"])
+def add_trailer_maintenance(tid):
+    conn = get_db_connection()
+    trailer = conn.execute("SELECT plate_number FROM trailers WHERE id=?", (tid,)).fetchone()
+    if not trailer:
+        conn.close()
+        return jsonify({"error": "Traileria ei löydy"}), 404
+    data = request.get_json()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO trailer_maintenance (trailer_id, maintenance_type, date, next_due, notes)
+        VALUES (?,?,?,?,?)
+    """, (
+        trailer["plate_number"],
+        data.get("maintenance_type", "OTHER"),
+        data.get("date"),
+        data.get("next_due"),
+        data.get("notes"),
+    ))
+    # Päivitä trailerin huoltopäivät automaattisesti
+    mtype = data.get("maintenance_type", "OTHER")
+    next_due = data.get("next_due")
+    mdate = data.get("date")
+    if mtype == "INSPECTION":
+        conn.execute("UPDATE trailers SET inspection_date=?, inspection_due=? WHERE id=?",
+                     (mdate, next_due, tid))
+    elif mtype == "REFRIGERATION":
+        conn.execute("UPDATE trailers SET refrigeration_service_date=?, refrigeration_service_due=? WHERE id=?",
+                     (mdate, next_due, tid))
+    new_id = cursor.lastrowid
+    conn.commit()
+    row = conn.execute("SELECT * FROM trailer_maintenance WHERE id=?", (new_id,)).fetchone()
+    conn.close()
+    return jsonify(dict(row)), 201
+
+
+@app.route("/api/maintenance/<int:mid>", methods=["PUT"])
+def update_maintenance(mid):
+    data = request.get_json()
+    conn = get_db_connection()
+    conn.execute("""
+        UPDATE trailer_maintenance SET maintenance_type=?, date=?, next_due=?, notes=? WHERE id=?
+    """, (data.get("maintenance_type"), data.get("date"), data.get("next_due"), data.get("notes"), mid))
+    conn.commit()
+    row = conn.execute("SELECT * FROM trailer_maintenance WHERE id=?", (mid,)).fetchone()
+    conn.close()
+    return jsonify(dict(row))
+
+
+@app.route("/api/maintenance/<int:mid>", methods=["DELETE"])
+def delete_maintenance(mid):
+    conn = get_db_connection()
+    conn.execute("DELETE FROM trailer_maintenance WHERE id=?", (mid,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/trailers/<int:tid>/inspection", methods=["PUT"])
+def update_inspection(tid):
+    data = request.get_json()
+    conn = get_db_connection()
+    conn.execute("UPDATE trailers SET inspection_date=?, inspection_due=? WHERE id=?",
+                 (data.get("inspection_date"), data.get("inspection_due"), tid))
+    conn.commit()
+    row = conn.execute("SELECT * FROM trailers WHERE id=?", (tid,)).fetchone()
+    conn.close()
+    return jsonify(dict(row))
+
+
+@app.route("/api/trailers/<int:tid>/refrigeration", methods=["PUT"])
+def update_refrigeration(tid):
+    data = request.get_json()
+    conn = get_db_connection()
+    conn.execute("""
+        UPDATE trailers SET refrigeration_service_date=?, refrigeration_service_due=?,
+            refrigeration_service_interval_months=? WHERE id=?
+    """, (data.get("refrigeration_service_date"), data.get("refrigeration_service_due"),
+          data.get("refrigeration_service_interval_months", 6), tid))
+    conn.commit()
+    row = conn.execute("SELECT * FROM trailers WHERE id=?", (tid,)).fetchone()
+    conn.close()
+    return jsonify(dict(row))
+
+
+# ===== KM RATES =====
+
+@app.route("/api/km-rates", methods=["GET"])
+def get_km_rates():
+    conn = get_db_connection()
+    rows = conn.execute("SELECT * FROM km_rates ORDER BY valid_from DESC").fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/km-rates/current", methods=["GET"])
+def get_current_km_rate():
+    today = request.args.get("date", datetime.now().strftime("%Y-%m-%d"))
+    conn = get_db_connection()
+    row = conn.execute("""
+        SELECT * FROM km_rates
+        WHERE valid_from <= ?
+          AND (valid_to IS NULL OR valid_to >= ?)
+        ORDER BY valid_from DESC LIMIT 1
+    """, (today, today)).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({"error": "Ei voimassa olevaa km-hinnastoa"}), 404
+    return jsonify(dict(row))
+
+
+@app.route("/api/km-rates", methods=["POST"])
+def create_km_rate():
+    data = request.get_json()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO km_rates (valid_from, valid_to, domestic_rate, continent_rate, notes)
+        VALUES (?,?,?,?,?)
+    """, (data.get("valid_from"), data.get("valid_to") or None,
+          data.get("domestic_rate"), data.get("continent_rate"), data.get("notes")))
+    new_id = cursor.lastrowid
+    conn.commit()
+    row = conn.execute("SELECT * FROM km_rates WHERE id=?", (new_id,)).fetchone()
+    conn.close()
+    return jsonify(dict(row)), 201
+
+
+@app.route("/api/km-rates/<int:rid>", methods=["PUT"])
+def update_km_rate(rid):
+    data = request.get_json()
+    conn = get_db_connection()
+    conn.execute("""
+        UPDATE km_rates SET valid_from=?, valid_to=?, domestic_rate=?, continent_rate=?, notes=? WHERE id=?
+    """, (data.get("valid_from"), data.get("valid_to") or None,
+          data.get("domestic_rate"), data.get("continent_rate"), data.get("notes"), rid))
+    conn.commit()
+    row = conn.execute("SELECT * FROM km_rates WHERE id=?", (rid,)).fetchone()
+    conn.close()
+    return jsonify(dict(row))
+
+
+@app.route("/api/km-rates/<int:rid>", methods=["DELETE"])
+def delete_km_rate(rid):
+    conn = get_db_connection()
+    conn.execute("DELETE FROM km_rates WHERE id=?", (rid,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+# ===== FERRY RATES =====
+
+@app.route("/api/ferry-rates-db", methods=["GET"])
+def get_ferry_rates_db():
+    conn = get_db_connection()
+    rows = conn.execute("SELECT * FROM ferry_rates ORDER BY route").fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/ferry-rates-db", methods=["POST"])
+def create_ferry_rate():
+    data = request.get_json()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO ferry_rates (route, price, valid_from, valid_to, notes)
+        VALUES (?,?,?,?,?)
+    """, (data.get("route"), data.get("price"), data.get("valid_from"),
+          data.get("valid_to") or None, data.get("notes")))
+    new_id = cursor.lastrowid
+    conn.commit()
+    row = conn.execute("SELECT * FROM ferry_rates WHERE id=?", (new_id,)).fetchone()
+    conn.close()
+    return jsonify(dict(row)), 201
+
+
+@app.route("/api/ferry-rates-db/<int:rid>", methods=["PUT"])
+def update_ferry_rate(rid):
+    data = request.get_json()
+    conn = get_db_connection()
+    conn.execute("""
+        UPDATE ferry_rates SET route=?, price=?, valid_from=?, valid_to=?, notes=? WHERE id=?
+    """, (data.get("route"), data.get("price"), data.get("valid_from"),
+          data.get("valid_to") or None, data.get("notes"), rid))
+    conn.commit()
+    row = conn.execute("SELECT * FROM ferry_rates WHERE id=?", (rid,)).fetchone()
+    conn.close()
+    return jsonify(dict(row))
+
+
+@app.route("/api/ferry-rates-db/<int:rid>", methods=["DELETE"])
+def delete_ferry_rate(rid):
+    conn = get_db_connection()
+    conn.execute("DELETE FROM ferry_rates WHERE id=?", (rid,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+# ===== SETTINGS =====
+
+@app.route("/api/settings", methods=["GET"])
+def get_settings():
+    conn = get_db_connection()
+    rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    conn.close()
+    return jsonify({r["key"]: r["value"] for r in rows})
+
+
+@app.route("/api/settings", methods=["PUT"])
+def update_settings():
+    data = request.get_json()
+    if not data or not isinstance(data, dict):
+        return jsonify({"error": "Virheellinen pyyntö"}), 400
+    conn = get_db_connection()
+    for key, value in data.items():
+        conn.execute("""
+            INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+        """, (key, value))
+    conn.commit()
+    rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    conn.close()
+    return jsonify({r["key"]: r["value"] for r in rows})
+
+
 if __name__ == "__main__":
     app.run(debug=True)

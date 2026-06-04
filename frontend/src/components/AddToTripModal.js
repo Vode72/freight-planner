@@ -105,7 +105,7 @@ function AddToTripModal({ order, onClose, onSuccess, onCreateNewTrip }) {
   const getCapacityColor = (used, max) => {
     const pct = max > 0 ? (used / max) * 100 : 0;
     if (pct > 90) return "#ef4444";
-    if (pct > 75) return "#f97316";
+    if (pct > 70) return "#f97316";
     return "#22c55e";
   };
 

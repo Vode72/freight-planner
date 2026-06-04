@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python init_db.py)",
+      "Bash(node -e ' *)",
+      "Bash(node -e \"const p = require\\('./frontend/package.json'\\); console.log\\('react-router-dom:', p.dependencies['react-router-dom'] || 'EI ASENNETTU'\\);\")",
+      "Bash(npm install *)",
+      "Bash(node -e \"const p = require\\('./frontend/package.json'\\); console.log\\('react-router-dom:', p.dependencies['react-router-dom']\\);\")",
+      "Bash(node -e \"const p = require\\('c:/Users/Toniv/OneDrive/Ohjelmointi_projektit/freight-planner/frontend/package.json'\\); console.log\\('react-router-dom:', p.dependencies['react-router-dom']\\);\")",
+      "Bash(npx react-scripts *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(git add *)",
+      "Bash(python migrate_restrictions.py)",
+      "Bash(python -c \"with open\\('app.py'\\) as f: lines = f.readlines\\(\\); print\\(f'Rivejä yhteensä: {len\\(lines\\)}'\\); print\\(''.join\\(lines[-30:]\\)\\)\")",
+      "Bash(Start-Process -NoNewWindow -FilePath \"python\" -ArgumentList \"app.py\")",
+      "Bash(Start-Sleep 3)",
+      "Bash(Write-Host \"Server käynnistetty\")",
+      "Bash(curl -s -X POST http://127.0.0.1:5000/api/check-restrictions -H 'Content-Type: application/json' -d '{\"countries\":[\"DE\",\"CH\"],\"departure\":\"2026-05-16T20:00\",\"arrival\":\"2026-05-19T14:00\",\"weight_t\":24.0}')",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s http://127.0.0.1:5000/api/km-rates)",
+      "Bash(curl -s http://127.0.0.1:5000/api/ferry-rates-db)",
+      "Bash(python3 -c \"import sys,json;d=json.load\\(sys.stdin\\);[print\\(f'  {r[\\\\\"route\\\\\"]} {r[\\\\\"price\\\\\"]}€'\\) for r in d]\")",
+      "Bash(curl -s http://127.0.0.1:5000/api/trailers/1/maintenance)",
+      "Bash(python3 -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\(f'Traileri 1 huoltohistoria: {len\\(d\\)} merkintää'\\);[print\\(f'  {r[\\\\\"maintenance_type\\\\\"]} {r[\\\\\"date\\\\\"]} next:{r[\\\\\"next_due\\\\\"]}'\\) for r in d]\")",
+      "Bash(curl -s http://127.0.0.1:5000/api/trucks)",
+      "Bash(python3 -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\(f'{len\\(d\\)} vetäjää'\\);[print\\(f'  id={t[\\\\\"id\\\\\"]} {t[\\\\\"plate_number\\\\\"]} carrier={t[\\\\\"carrier_id\\\\\"]} status={t[\\\\\"status\\\\\"]}'\\) for t in d[:4]]\")",
+      "Bash(curl -s \"http://127.0.0.1:5000/api/trailers\")",
+      "Bash(python3 -c ' *)",
+      "Bash(python migrate_settings.py)",
+      "Bash(pkill -f \"python app.py\")",
+      "Bash(python app.py)",
+      "Bash(curl -s http://127.0.0.1:5000/api/settings)",
+      "Bash(curl -s -X PUT http://127.0.0.1:5000/api/settings -H 'Content-Type: application/json' -d '{\"forwarder_name\":\"Test Oy\",\"alert_inspection_days\":\"45\"}')",
+      "Bash(python3 -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\(d['forwarder_name'], d['alert_inspection_days']\\)\")",
+      "Bash(curl -s -X PUT http://127.0.0.1:5000/api/settings -H 'Content-Type: application/json' -d '{\"forwarder_name\":\"Demo Freight Oy\",\"alert_inspection_days\":\"30\"}')"
+    ]
+  }
+}

@@ -1,5 +1,5 @@
 FREIGHT PLANNER — PROJEKTIN KONTEKSTI VS CODE CLAUDELLE
-Päivitetty: 10.05.2026 (v6)
+Päivitetty: 04.06.2026 (v10)
 ============================================================
 
 ROOLI:
@@ -28,6 +28,7 @@ trips:
   loading_date/time, delivery_date/time, fixed_delivery_date,
   ferry_route, ferry_departure, ferry_arrival,
   adr, tail_lift, temperature_controlled,
+  tail_lift_unloading (bool) — checkbox: terminaalipurku järjestetty ✅
   loading_instructions, notes
   loading_started_at    ✅ (FEC-kuittaus)
   loading_completed_at  ✅ (FEC-kuittaus)
@@ -62,6 +63,18 @@ trailers: (12 kpl TIP Trailer Services)
   plate_number, identifier, trailer_type, leasing_rate, rental_rate, status
   Tyypit: Umpikaappi (42/65€), Sivuaukeava (45/70€),
           Umpikaappi 2-koneinen (43/67€), Pressutrailer (35/54€), Megatrailer (38/59€)
+  ✅ VALMIS (Feature 7A):
+  inspection_date       (viimeisin katsastus)
+  inspection_due        (seuraava katsastus, deadline)
+  refrigeration_service_date  (viimeisin kylmäkonehuolto)
+  refrigeration_service_due   (seuraava kylmäkonehuolto)
+  refrigeration_service_interval_months  (huoltoväli kk, esim. 6)
+  maintenance_notes     (vapaa teksti, huoltofirma jne.)
+
+trailer_maintenance: ✅ VALMIS
+  id, trailer_id, maintenance_type (INSPECTION/REFRIGERATION/OTHER),
+  date, next_due, notes, created_at
+  (historia kaikista huolloista ja katsastuksista)
 
 carriers: (6 kuljetusyhtiötä — 3 FI, 3 EU)
   name, country, city, business_id, contact_person, phone
@@ -79,13 +92,13 @@ customers: ✅ VALMIS
   Demo-asiakkaat: Nordic Demo Plastics Oy, Baltic Demo Foods Oy,
                   Demo Retail Finland Oy, Euro Demo GmbH, Continental Demo BV
 
-country_restrictions: ── TULOSSA ──
+country_restrictions: ✅ VALMIS
   id, country_code, restriction_type, day_of_week,
   date_from, date_to, time_from, time_to,
   min_weight_t, max_weight_t, description,
   severity (red/orange/yellow), exemptions, active
 
-km_rates: ── TULOSSA ──
+km_rates: ✅ VALMIS
   id, valid_from, valid_to,
   domestic_rate (€/km, koodi 210),
   continent_rate (€/km, koodi 220)
@@ -159,6 +172,19 @@ DriverPage.js     — ✅ FEC-kuittaussivu (mobiilioptimoitu, max 480px)
                     4 painiketta: Lastaus alkanut / valmis / Purku alkanut / valmis
                     automaatti: loading_started >30 min myöhässä → kulu 800 (45€/h)
                     automaatti: delivery_completed → delivered_at asetetaan (OTD)
+HallintaKalusto.jsx    — ✅ Kalusto & Kumppanit (🚛 /hallinta/kalusto)
+                    Välilehdet: Kuljetusyhtiöt | Trailerit (katsastus+huolto) | Vetäjät
+                    Trailerit: badge 🔴/🟠/🟡/✅, expandoituva huoltohistoria
+HallintaAsetukset.jsx  — ✅ Asetukset (⚙️ /hallinta/asetukset)
+                    Välilehdet: Oma yritys (live-esikatselu) | Ilmoitukset (togglet)
+                    settings-taulu: 6 yritystietoa + 8 hälytyskonfiguraatiota
+HallintaHinnoittelu.jsx — ✅ Hinnoittelu (💼 /hallinta/hinnoittelu)
+                    Välilehdet: Polttoaine | Kilometrit | Lautat | Maarajoitukset
+CountryRestrictionsPage.jsx — ✅ Maarajoitukset (🌍 /restrictions)
+                    Osio A: sääntölista + maasuodatin (lippupainikkeet) + CRUD-modal
+                    Osio B: reittitarkistin — automaattinen välimaavalinta,
+                            tuloskortit per maa värikoodattuina (red/orange/yellow)
+                    Osio C: terminaalihakemisto + CRUD-modal
 CostsDashboard.js — ✅ Costs Dashboard (💸 Työkalut-osiossa sidebarissa)
                     4 KPI-korttia (Myynti / Ostot / Kate€ / Kate%)
                     aikavälisuodatin (viikko/kuukausi/kvartaali/vuosi/custom)
@@ -199,15 +225,28 @@ Fuel:       GET/POST /api/fuel-rates
             PUT /api/fuel-rates/:id
             DELETE /api/fuel-rates/:id
 Dashboard:  GET /api/costs-dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD
+Maintenance: GET/POST /api/trailers/:id/maintenance
+            PUT/DELETE /api/maintenance/:id
+            PUT /api/trailers/:id/inspection
+            PUT /api/trailers/:id/refrigeration
+Km-rates: GET/POST /api/km-rates, PUT/DELETE /api/km-rates/:id
+            GET /api/km-rates/current
+Ferry-rates: GET/POST /api/ferry-rates, PUT/DELETE /api/ferry-rates/:id
+Settings:  GET /api/settings, PUT /api/settings
+Country:  GET/POST /api/country-restrictions
+            PUT/DELETE /api/country-restrictions/:id
+            POST /api/check-restrictions
+Terminals: GET/POST /api/terminals
+            PUT/DELETE /api/terminals/:id
 Driver:     GET /api/driver/:trip_id        — kuljettajan näkymä (julkinen)
             POST /api/driver/:trip_id/checkin — kuittaus (4 vaihetta)
               automaatti: odotusaika (800) jos loading_started myöhässä >30min
               automaatti: delivered_at asetetaan delivery_completed-kuittauksella
 
 API-ENDPOINTIT — TULOSSA:
-  Country:  GET/POST /api/country-restrictions
-            PUT/DELETE /api/country-restrictions/:id
-            POST /api/trips/:id/check-restrictions
+            POST /api/check-restrictions
+  Maintenance: GET/POST /api/trailers/:id/maintenance
+               PUT/DELETE /api/maintenance/:id
   PowerBI:  GET /api/powerbi/costs
             GET /api/powerbi/operations
             GET /api/powerbi/trailers
@@ -234,6 +273,10 @@ VALMIIT KOKONAISUUDET
 ✅ 13. Statusvärit Trip-listassa
 ✅ 14. Kapasiteettipalkit värikoodattuina (0-70% vihreä / 70-90% oranssi /
         90-100% punainen / 100%+ punainen vilkkuva ⚠️)
+✅ 15. Maakohtaiset rajoitukset + ajokiellot (CountryRestrictionsPage,
+        country_restrictions-taulu, restriction_engine.py, 9 API-endpointia)
+✅ 16. Terminaalihakemisto (16 terminaalia 8 maahan, CRUD, terminals-taulu)
+✅ 17. Trips: tail_lift_unloading + unloading_terminal_id
 
 ============================================================
 BISNESLOGIIKKA
@@ -311,6 +354,16 @@ REITTIMATCH-LOGIIKKA: good ✅ / warning ⚠️ / bad ❌
 - Naapurimaa → warning
 - Muu → bad
 
+TRAILERIN KATSASTUS & HUOLTO (toteutetaan kohta 7):
+- Katsastuspäivämäärä + seuraava deadline per traileri
+- Kylmäkonehuolto (vain thermo-trailerit): viimeisin + seuraava + huoltoväli (kk)
+- Huoltohistoria: trailer_maintenance-taulu
+- Hälytykset:
+    🔴 Katsastus umpeutunut tai kylmäkonehuolto myöhässä
+    🟠 Katsastus/huolto alle 30 päivää
+    🟡 Alle 60 päivää
+- Näkyy: TrailerList (varoitusikoni per rivi) + Dashboard (hälytyskortti)
+
 ============================================================
 MAAKOHTAISET RAJOITUKSET — SUUNNITELMA
 ============================================================
@@ -341,7 +394,15 @@ DEMO-DATA (valmiiksi syötettävät maat):
   🇨🇭 CH — Painoraja max GVW 40t 🔴 (EU:n 44t ei kelpaa!)
   🇩🇪 DE — Sunnuntaikielto 00:00-22:00 / 7,5t 🟠
   🇩🇪 DE — Kesälauantai heinä-elokuu tietyillä reiteillä 🟡
+  🇮🇹 IT
+    Demo Terminal Milano      — Via della Logistica 9, Milano
+    Demo Terminal Roma        — Via Portuense 33, Roma
+
   🇦🇹 AT — Sunnuntaikielto 00:00-22:00 / 7,5t 🟠
+  🇮🇹 IT
+    Demo Terminal Milano      — Via della Logistica 9, Milano
+    Demo Terminal Roma        — Via Portuense 33, Roma
+
   🇦🇹 AT — Brenner-reitin lisärajoitukset yöllä 🟠
   🇫🇷 FR — Sunnuntaikielto 00:00-22:00 / 7,5t 🟠
   🇮🇹 IT — Sunnuntaikielto 07:00-22:00 / 7,5t 🟠
@@ -453,8 +514,11 @@ RAKENNUSJÄRJESTYS:
 ✅ 3. TripDetail Kustannukset uusiksi
 ✅ 4. Costs Dashboard
 ✅ 5. FEC-kuittaussivu + automaatiot
-→  6. Maakohtaiset rajoitukset + ajokiellot (SEURAAVA)
-   7. Hallinta-osio uudelleenrakennus
+✅ 6. Maakohtaiset rajoitukset + ajokiellot
+✅ 7. Hallinta-osio uudelleenrakennus (Feature 7A valmis)
+        + Trailerin katsastus & kylmäkonehuolto
+→  8. Raportit-näkymä (SEURAAVA)
+      + Trailerin katsastus & kylmäkonehuolto (sisältyy tähän)
    8. Raportit-näkymä
    9. Power BI API-endpointit
 
@@ -473,6 +537,8 @@ HALLINTA
 KALUSTO & KUMPPANIT — /hallinta/kalusto
   Välilehdet: 🏢 Kuljetusyhtiöt | 🚐 Trailerit | 👤 Vetäjät
   Yhdistää nykyiset CarrierList, TrailerList + trucks inlinenä
+  Trailerit-välilehdellä: katsastus + kylmäkonehuolto-sarakkeet
+    varoitusikoni 🔴/🟠/🟡 jos deadline lähestyy
 
 HINNOITTELU — /hallinta/hinnoittelu
   Välilehdet: ⛽ Polttoaine | 🛣️ Kilometrit | ⛴️ Lautat | 🌍 Maarajoitukset
@@ -525,10 +591,12 @@ FREIGHT PLANNER VS SAP — KILPAILUEDUT
       - Trip jonka lauttabooking puuttuu + lähtöaika lähestyy
       - Trailer seisonut yli X päivää
       - Trip ei ehdi ajokieltojen takia
+      - Trailerin katsastus umpeutunut
    ⚠️ TARKISTA
       - Ylikuormattu trip (paino/LDM yli 100%)
       - Trip ilman myyntirivejä
       - Tiukka aikataulu ajokieltojen takia
+      - Katsastus/huolto alle 30 päivää
    💡 SUOSITUKSET
       - Seuraavaan keikkaan suositeltu trailer (vanhin seisoja)
       - Vapaat orderit sopivalle reitille
@@ -649,10 +717,6 @@ TULEVA KEHITYS
       Trip vahvistetaan →
         1. Transport Order PDF → sähköpostilla kuljetusyhtiölle
         2. SMS kuljettajalle (automaattinen teksti + FEC-linkki)
-           Muoto:
-             Unit: [truck] [trailer]
-             Delivery 1: [osoite] - [ldm]/[kg]/[qty][pallet_type] - [kaupunki]
-             Kuittaa: https://freightplanner.com/driver/TRP-2026-001
         3. Kuljettaja kuittaa FEC-linkistä
 
     TULOSTUS/LÄHETYSVALIKKO TripDetailissa:
@@ -694,7 +758,7 @@ GIT-Tilanne
 ============================================================
 GitHub: github.com/Vode72/freight-planner
 .gitignore: node_modules/ ja freight.db jätetään pois
-Viimeisin commit: FEC-kuittaussivu + tietokantamigraatio + OTD-automaatti
+Viimeisin commit: Feature 7B — Asetukset-sivu (settings-taulu, yritystiedot, ilmoitukset)
 
 ============================================================
 --- MYÖHEMMIN ---
@@ -705,3 +769,137 @@ Traffic Coordinator Planner — oma välilehti Freight Plannerissa
              (ajoaika, aikaikkunat, closing-riski)
   Data: suoraan olemassa olevasta backendistä
   (orderit, trailerit, vetäjät, trippit)
+
+============================================================
+TRAILERIN SOPIVUUSLOGIIKKA — LISÄYS
+============================================================
+
+PERÄLAUTA (tail_lift = true orderilla):
+→ 🟠 VAROITUS AddToTripModalissa:
+  "Order vaatii perälauta-purun. Suunnittele terminaalipurku."
+→ TripDetailin keikan avauksessa checkbox:
+  ☐ Terminaalipurku järjestetty  (trips.tail_lift_unloading bool)
+  Varoitus näkyy kunnes checkbox kuitattu ✅
+→ 🔴 ESTO jos traileri on Umpikaappi tai Umpikaappi 2-koneinen:
+  Perälauta-lastaus sivulta mahdoton
+
+PITKÄT TAVARAT (pallet_length > 250 cm):
+→ 🔴 ESTO jos traileri on Umpikaappi tai Umpikaappi 2-koneinen:
+  "Order sisältää pitkiä tavaroita (>2,5m). Vaatii kylkiaukeavan tai pressun."
+→ Sopivat tyypit: Sivuaukeava ✅  Pressutrailer ✅  Megatrailer ✅
+
+YHTEENVETO — sopivuustaulukko:
+  Trailerityyppi          | Perälauta | Pitkät >2,5m
+  ------------------------+-----------+-------------
+  Pressutrailer           | ✅ sopii  | ✅ sopii
+  Megatrailer             | ✅ sopii  | ✅ sopii
+  Sivuaukeava             | ✅ sopii  | ✅ sopii
+  Umpikaappi              | 🔴 esto   | 🔴 esto
+  Umpikaappi 2-koneinen   | 🔴 esto   | 🔴 esto
+
+MISSÄ TARKISTETAAN:
+  1. AddToTripModal — orderia lisätään → tarkistus trailerityyppiä vasten
+  2. TripDetail → Orders-välilehti → varoitusikoni per order jos ei kuitattu
+  3. Trip vahvistetaan → lopullinen tarkistus (kaikki tail_lift kuitattu?)
+
+TIETOKANTAMUUTOS (trips-taulu):
+  tail_lift_unloading INTEGER DEFAULT 0
+  (lisätään kohdan 6 tai 7 migraatiossa)
+
+============================================================
+TERMINAALIT — SUUNNITELMA
+============================================================
+
+UUSI TAULU: terminals
+  id, name, country_code, city, address,
+  contact_person, phone, has_tail_lift (bool), notes, active
+
+LINKITYS:
+  trips-tauluun: unloading_terminal_id (viittaa terminals.id)
+  Käyttö: kun tail_lift_unloading checkbox kuitataan →
+          valitaan terminaali dropdown:sta
+
+DEMO-DATA (16 terminaalia, 2 per maa):
+
+  🇫🇮 FI
+    Demo Terminal Helsinki    — Vuosaari, Helsinki
+    Demo Terminal Tampere     — Naistenlahti, Tampere
+
+  🇧🇪 BE
+    Demo Terminal Antwerpen   — Havenstraat 12, Antwerpen
+    Demo Terminal Bruxelles   — Rue du Port 8, Bruxelles
+
+  🇳🇱 NL
+    Demo Terminal Rotterdam   — Waalhaven 34, Rotterdam
+    Demo Terminal Amsterdam   — Westpoort 17, Amsterdam
+
+  🇩🇪 DE
+    Demo Terminal Hamburg     — Hafenweg 22, Hamburg
+    Demo Terminal Frankfurt   — Industriestr. 45, Frankfurt am Main
+
+  🇫🇷 FR
+    Demo Terminal Paris       — Rue de la Logistique 5, Rungis (Paris)
+    Demo Terminal Lyon        — Avenue du Port 18, Lyon
+
+  🇨🇭 CH
+    Demo Terminal Zürich      — Industriestrasse 8, Zürich
+    Demo Terminal Basel       — Rheinweg 14, Basel
+
+  🇮🇹 IT
+    Demo Terminal Milano      — Via della Logistica 9, Milano
+    Demo Terminal Roma        — Via Portuense 33, Roma
+
+  🇦🇹 AT
+    Demo Terminal Wien        — Laxenburger Str. 20, Wien
+    Demo Terminal Innsbruck   — Innsbrucker Str. 3, Innsbruck
+
+KÄYTTÖ UI:SSA:
+  TripDetail → Orders-välilehti:
+    Jos orderilla tail_lift = true ja tail_lift_unloading = false →
+    🟠 "Suunnittele terminaalipurku" + dropdown terminaalin valintaan
+    Kun terminaali valittu + checkbox kuitattu → varoitus poistuu ✅
+
+  Terminaalilista hallinnassa (Hallinta-osio, myöhemmin):
+    CRUD — lisää/muokkaa/poista terminaaleja
+
+============================================================
+TRAILERIN SOPIVUUSLOGIIKKA — PÄIVITETTY v9
+============================================================
+
+PERÄLAUTA-FLOW (tail_lift = true orderilla):
+  Perälauta EI ole trailerin esto-ehto.
+  Perälauta koskee purkua, ei lastausta.
+
+  Flow:
+    1. Order lisätään tripille normaalisti — mikä tahansa traileri sopii
+    2. 🟠 VAROITUS TripDetailissa: "Suunnittele terminaalipurku"
+    3. Dispatcher valitsee terminaalin dropdownista
+    4. Kuittaa: ☑ Terminaalipurku järjestetty (tail_lift_unloading = true)
+    5. Varoitus poistuu ✅
+    Terminaalista asiakas saa tavaran perälaudallisella ajoneuvolla
+
+PITKÄT TAVARAT (pallet_length > 250 cm):
+  → 🔴 ESTO jos traileri on Umpikaappi tai Umpikaappi 2-koneinen
+  → Syy: ei mahdu sivulta sisään, takaa liian pitkä
+  → Sopivat: Pressutrailer ✅ Megatrailer ✅ Sivuaukeava ✅
+
+SOPIVUUSTAULUKKO:
+  Trailerityyppi          | Pitkät >2,5m | Kylmäkone | Perälauta
+  ------------------------+--------------+-----------+----------
+  Pressutrailer           | ✅ sopii     | ❌ ei     | ✅ (terminaaliflow)
+  Megatrailer             | ✅ sopii     | ❌ ei     | ✅ (terminaaliflow)
+  Sivuaukeava             | ✅ sopii     | ✅ kyllä  | ✅ (terminaaliflow)
+  Umpikaappi              | 🔴 esto      | ✅ kyllä  | ✅ (terminaaliflow)
+  Umpikaappi 2-koneinen   | 🔴 esto      | ✅ kyllä  | ✅ (terminaaliflow)
+
+HUOM: Sivuaukeava on thermo-traileri mutta EI sisällä perälautaa.
+      Kaikki trailerityypit sopivat perälauta-orderille —
+      purku hoidetaan aina terminaaliflown kautta.
+
+MISSÄ TARKISTETAAN:
+  1. AddToTripModal:
+     - pallet_length > 250cm + Umpikaappi/Umpikaappi 2-koneinen → 🔴 esto
+     - tail_lift = true → 🟠 varoitus "Terminaalipurku tarvitaan"
+  2. TripDetail → Orders-välilehti:
+     - tail_lift-orderit joilla ei terminal kuitattu → 🟠 varoitus per order
+  3. Trip vahvistus → tarkistus: kaikki tail_lift-orderit kuitattu?

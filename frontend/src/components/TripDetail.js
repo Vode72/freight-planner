@@ -42,38 +42,28 @@ const COST_GROUPS = [
 ];
 
 function CapacityBar({ label, value, max, unit }) {
-  const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
-  const color = pct > 90 ? "#ef4444" : pct > 75 ? "#f97316" : "#22c55e";
+  const actualPct = max > 0 ? (value / max) * 100 : 0;
+  const barPct    = Math.min(actualPct, 100);
+  const isOver    = actualPct > 100;
+  const color     = isOver || actualPct > 90 ? "#ef4444"
+                  : actualPct > 70            ? "#f97316"
+                                               : "#22c55e";
   return (
     <div style={{ flex: 1 }}>
-      <div style={{
-        display: "flex",
-        justifyContent: "space-between",
-        fontSize: "12px",
-        color: "#94a3b8",
-        marginBottom: "4px"
-      }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>
         <span>{label}</span>
-        <span style={{ color: pct > 90 ? "#ef4444" : "#cbd5e1" }}>
-          {value} / {max} {unit}
+        <span style={{ color: isOver ? "#ef4444" : "#cbd5e1", fontWeight: isOver ? "700" : "400" }}>
+          {isOver ? "⚠️ " : ""}{value} / {max} {unit}
         </span>
       </div>
-      <div style={{
-        height: "8px",
-        background: "#334155",
-        borderRadius: "4px",
-        overflow: "hidden"
-      }}>
-        <div style={{
-          height: "100%",
-          width: `${pct}%`,
-          background: color,
-          borderRadius: "4px",
-          transition: "width 0.3s ease"
-        }} />
+      <div style={{ height: "8px", background: "#334155", borderRadius: "4px", overflow: "hidden" }}>
+        <div
+          className={isOver ? "capacity-bar-overload" : ""}
+          style={{ height: "100%", width: `${barPct}%`, background: color, borderRadius: "4px", transition: "width 0.3s ease" }}
+        />
       </div>
-      <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
-        {pct.toFixed(0)}%
+      <div style={{ fontSize: "11px", color: isOver ? "#ef4444" : "#64748b", marginTop: "2px", fontWeight: isOver ? "700" : "400" }}>
+        {actualPct.toFixed(0)}%
       </div>
     </div>
   );

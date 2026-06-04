@@ -258,7 +258,7 @@ function TripList() {
             <tbody>
               {filteredTrips.map(t => (
                 <tr key={t.id} onClick={() => navigate(`/trips/${t.id}/orders`)}>
-                  <td style={{ color: "#f97316", fontWeight: "600" }}>
+                  <td style={{ color: "#f97316", fontWeight: "600", borderLeft: `3px solid ${STATUS_COLORS[t.status] || "#475569"}`, paddingLeft: "11px" }}>
                     {t.trip_id}
                   </td>
                   <td>

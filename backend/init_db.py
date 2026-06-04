@@ -46,6 +46,11 @@ CREATE TABLE IF NOT EXISTS trips (
     temperature_controlled INTEGER DEFAULT 0,
     loading_instructions TEXT,
     notes TEXT,
+    loading_started_at TEXT,
+    loading_completed_at TEXT,
+    delivery_started_at TEXT,
+    delivery_completed_at TEXT,
+    delivered_at TEXT,
     FOREIGN KEY (carrier_id) REFERENCES carriers(id),
     FOREIGN KEY (trailer_id) REFERENCES trailers(id)
 )
