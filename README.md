@@ -6,6 +6,15 @@ Designed to demonstrate how operational logistics expertise can be transformed i
 
 ---
 
+## 🎯 Project Goals
+
+- Model real-world transport planning workflows in software
+- Demonstrate full-stack development skills (React + Flask + SQLite)
+- Showcase logistics domain expertise through realistic business logic
+- Build a practical TMS portfolio project that solves real operational challenges
+
+---
+
 ## 🏗️ Architecture
 
 ```
