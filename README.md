@@ -1,8 +1,8 @@
 # 🚛 Freight Planner
 
-A full-stack Transport Management System (TMS) built as a portfolio project, demonstrating real-world logistics operations management. Inspired by actual workflows from Finnish international freight forwarding — Finland ↔ Continental Europe via Finnlines/Transfennica ferry connections.
+A full-stack Transport Management System (TMS) built as a portfolio project, demonstrating real-world logistics operations management. Inspired by real-world international freight forwarding workflows between Finland and Continental Europe.
 
-Designed and developed to demonstrate how practical logistics expertise can be transformed into modern software solutions.
+Designed to demonstrate how operational logistics expertise can be transformed into modern Transport Management System (TMS) software.
 
 ---
 
@@ -302,7 +302,7 @@ freight-planner/
 
 ## 👨‍💻 Author
 
-Built by **Toni Voutilainen** — combining over 10 years of logistics industry experience with full-stack software development.
+Built by **Toni Voutilainen** — combining over 10 years of logistics industry experience with full-stack software development to create practical solutions for real-world transport planning challenges.
 
 > *"This project demonstrates how logistics expertise and software development can be combined to build practical business solutions for real operational challenges."*
 
