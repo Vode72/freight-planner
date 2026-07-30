@@ -4,21 +4,48 @@ A full-stack Transport Management System (TMS) built as a portfolio project, dem
 
 ---
 
+## 🏗️ Architecture
+
+```
+React 18 Frontend
+       │
+   REST API
+       │
+Python Flask
+       │
+    SQLite
+```
+
+---
+
 ## 🌐 Live Demo
 
 > **Username:** `demo` **Password:** `freight2024`
 
 ---
 
+## ⚡ Key Features
+
+- 🚛 **Trip Management** — full lifecycle from planning to invoicing
+- 📦 **Order Management** — capacity validation, trailer compatibility checks
+- 💰 **Cost Management** — 20+ cost codes, auto fuel surcharge, margin tracking
+- 🚐 **Fleet & Trailer Management** — inspection tracking, refrigeration service alerts
+- 👥 **Customer Management** — consignor/consignee registry with autocomplete
+- 🌍 **Country Restriction Engine** — driving ban rules across 9 countries
+- 📱 **Driver Mobile Workflow** — FEC check-in without login, OTD tracking
+- 📊 **KPI Dashboard** — real-time margins, OTD%, capacity utilization
+
+---
+
 ## 📸 Screenshots
 
-| Login | Dashboard | Trip Detail |
+| Dashboard | Trip Detail | Cost Management |
 |---|---|---|
-| ![Login](screenshots/login.png) | ![Dashboard](screenshots/dashboard.png) | ![TripDetail](screenshots/tripdetail.png) |
+| ![Dashboard](screenshots/dashboard.png) | ![TripDetail](screenshots/tripdetail.png) | ![Costs](screenshots/costs.png) |
 
-| Cost Management | Hallinta — Kalusto | Maarajoitukset | FEC-kuittaus |
+| Hallinta — Kalusto | Maarajoitukset | FEC-kuittaus | Login |
 |---|---|---|---|
-| ![Costs](screenshots/costs.png) | ![Kalusto](screenshots/kalusto.png) | ![Restrictions](screenshots/restrictions.png) | ![FEC](screenshots/FEC.png) |
+| ![Kalusto](screenshots/kalusto.png) | ![Restrictions](screenshots/restrictions.png) | ![FEC](screenshots/FEC.png) | ![Login](screenshots/login.png) |
 
 ---
 
@@ -63,7 +90,7 @@ A full-stack Transport Management System (TMS) built as a portfolio project, dem
 - Sortable trip table with 8 columns
 - Visual cost breakdown by category (CSS-based bar chart)
 
-### 🏭 FEC Driver Check-in (Mobile)
+### 📱 FEC Driver Check-in (Mobile)
 - Public URL for drivers: `/driver/:trip_id` — no login required
 - 4 check-in buttons: Loading started / completed · Unloading started / completed
 - Auto: waiting cost (800) added if loading starts >30 min late
@@ -78,7 +105,7 @@ A full-stack Transport Management System (TMS) built as a portfolio project, dem
 - Color-coded results per country: 🔴 Blocked · 🟠 Warning · 🟡 Notice
 - 16 terminals across 8 countries for tail lift unloading planning
 
-### 🚛 Hallinta — Kalusto & Kumppanit
+### 🚐 Hallinta — Kalusto & Kumppanit
 - **Carriers:** 6 companies, trucks inline, status changes directly in list
 - **Trailers:** 12 trailers (TIP Trailer Services), type filter, leasing/rental rates
   - Inspection tracking: next due date with alert badges 🔴/🟠/🟡/✅
@@ -245,18 +272,29 @@ freight-planner/
 
 ---
 
-## 🔮 Planned Features
+## 🗺️ Roadmap
 
-- **Transport Order + CMR + Gateway Instruction List** — PDF generation
-- **Send Instructions workflow** — auto email to carrier + SMS to driver with FEC link
-- **Smart travel time calculator** — driving bans + EU 561/2006 rest times + ferry schedules → realistic ETA
-- **Reports view** — carrier profitability, OTD%, capacity utilization
-- **Power BI integration** — 4 dashboard pages via direct REST API
-- **Ferry booking unit type** — trailer only (13.6m) vs. complete unit (17m) with separate pricing
-- **Traffic Coordinator Planner** — Daily traffic plan, vessel ETA, import/export flow
-- **Map tracking + route optimization**
-- **Multiuser + roles**
-- **POD, document storage, customs documents**
+**Completed ✅**
+- Trip, Order & Cost Management
+- Fleet & Trailer Management (inspection + service tracking)
+- Customer Registry
+- Pricing Management (fuel, km, ferry rates)
+- Country Restriction Engine (9 countries, 15 rules)
+- Driver Mobile Workflow (FEC check-in)
+- KPI Dashboard + Costs Dashboard
+- Settings (company info, notification thresholds)
+
+**Planned 🔲**
+- Document Generation (Transport Order / CMR / Gateway Instruction List)
+- Send Instructions workflow (auto email + SMS to driver)
+- Smart ETA Calculator (driving bans + EU 561/2006 rest times + ferry schedules)
+- Reports view (carrier profitability, OTD%, capacity utilization)
+- Power BI integration (4 dashboard pages via REST API)
+- Ferry booking unit type (trailer only 13.6m vs. complete unit 17m)
+- Traffic Coordinator Planner (vessel ETA, import/export flow)
+- Map tracking + route optimization
+- Multiuser + roles
+- POD, document storage, customs documents
 
 ---
 
