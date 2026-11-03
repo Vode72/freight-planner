@@ -900,6 +900,7 @@ MISSÄ TARKISTETAAN:
   1. AddToTripModal:
      - pallet_length > 250cm + Umpikaappi/Umpikaappi 2-koneinen → 🔴 esto
      - tail_lift = true → 🟠 varoitus "Terminaalipurku tarvitaan"
+     
   2. TripDetail → Orders-välilehti:
      - tail_lift-orderit joilla ei terminal kuitattu → 🟠 varoitus per order
   3. Trip vahvistus → tarkistus: kaikki tail_lift-orderit kuitattu?
