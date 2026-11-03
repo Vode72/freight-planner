@@ -15,7 +15,7 @@ const STATUS_ORDER = ["Suunniteltu", "Vahvistettu", "Käynnissä", "Toimitettu",
 const COST_CODES = [
   { code: "100", description: "SPOT PRICE", type: "revenue" },
   { code: "120", description: "FREIGHT", type: "revenue" },
-  { code: "200", description: "POLTTOAINELISÄ", type: "cost" },
+  { code: "200", description: "POLTTOAINELISÄ", type: "revenue" },
   { code: "210", description: "KOTIMAAN AJO", type: "cost" },
   { code: "220", description: "MANTEREEN AJO", type: "cost" },
   { code: "300", description: "SAKSAN TIEMAKSU", type: "cost" },
@@ -135,7 +135,7 @@ function TripDetail() {
     cost_code: "200",
     description: "POLTTOAINELISÄ",
     amount: "",
-    cost_type: "cost",
+    cost_type: "revenue",
     custom_description: ""
   });
   const [showAddCost, setShowAddCost] = useState(false);
@@ -289,7 +289,7 @@ function TripDetail() {
           cost_code: "200",
           description: "POLTTOAINELISÄ",
           amount: "",
-          cost_type: "cost",
+          cost_type: "revenue",
           custom_description: ""
         });
         setShowAddCost(false);

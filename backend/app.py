@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from datetime import datetime
 from flask import Flask, request, jsonify
@@ -81,7 +82,7 @@ FERRY_ROUTES = [
 COST_CODES = [
     {"code": "100", "description": "SPOT PRICE", "type": "revenue"},
     {"code": "120", "description": "FREIGHT", "type": "revenue"},
-    {"code": "200", "description": "POLTTOAINELISÄ", "type": "cost"},
+    {"code": "200", "description": "POLTTOAINELISÄ", "type": "revenue"},
     {"code": "210", "description": "KOTIMAAN AJO", "type": "cost"},
     {"code": "220", "description": "MANTEREEN AJO", "type": "cost"},
     {"code": "300", "description": "SAKSAN TIEMAKSU", "type": "cost"},
@@ -126,6 +127,8 @@ def get_db_connection():
 
 
 def migrate_db():
+    if not os.path.exists(DB_NAME):
+        return
     conn = get_db_connection()
     existing = {row[1] for row in conn.execute("PRAGMA table_info(trips)").fetchall()}
     fec_cols = ["loading_started_at", "loading_completed_at",
@@ -154,25 +157,28 @@ def calculate_volume(width, length, height, quantity):
 def generate_trip_id():
     year = datetime.now().year
     conn = get_db_connection()
-    count = conn.execute("SELECT COUNT(*) as c FROM trips").fetchone()["c"]
+    row = conn.execute("SELECT MAX(id) as max_id FROM trips").fetchone()
     conn.close()
-    return f"TRP-{year}-{str(count + 1).zfill(3)}"
+    next_num = (row["max_id"] or 0) + 1
+    return f"TRP-{year}-{str(next_num).zfill(3)}"
 
 
 def generate_order_id():
     year = datetime.now().year
     conn = get_db_connection()
-    count = conn.execute("SELECT COUNT(*) as c FROM orders").fetchone()["c"]
+    row = conn.execute("SELECT MAX(id) as max_id FROM orders").fetchone()
     conn.close()
-    return f"ORD-{year}-{str(count + 1).zfill(3)}"
+    next_num = (row["max_id"] or 0) + 1
+    return f"ORD-{year}-{str(next_num).zfill(3)}"
 
 
 def generate_order_reference():
     year = datetime.now().year
     conn = get_db_connection()
-    count = conn.execute("SELECT COUNT(*) as c FROM orders").fetchone()["c"]
+    row = conn.execute("SELECT MAX(id) as max_id FROM orders").fetchone()
     conn.close()
-    return f"HEL-{year}-{str(count + 1).zfill(3)}"
+    next_num = (row["max_id"] or 0) + 1
+    return f"HEL-{year}-{str(next_num).zfill(3)}"
 
 
 def is_locked(status):
@@ -1192,7 +1198,7 @@ def add_cost(trip_id):
             if fuel_amount > 0:
                 cursor.execute("""
                     INSERT INTO costs (trip_id, cost_code, description, amount, cost_type)
-                    VALUES (?, '200', ?, ?, 'cost')
+                    VALUES (?, '200', ?, ?, 'revenue')
                 """, (trip_id, f"POLTTOAINELISÄ (kerroin {rate['multiplier']})", fuel_amount))
                 fuel_cost_id = cursor.lastrowid
 
