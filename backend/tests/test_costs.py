@@ -93,26 +93,49 @@ def test_fuel_surcharge_type_is_revenue(client):
     assert row["cost_type"] == "revenue"
 
 
+def _trailer_rows(db_path, trip_id):
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT cost_code, amount, cost_type FROM costs WHERE trip_id=? ORDER BY cost_type",
+        (trip_id,),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
 def test_trailer_rental_added_on_confirmation(client):
-    """Status → Vahvistettu adds cost 400 (leasing) and revenue 401 (rental)."""
+    """Status → Vahvistettu adds two code-400 rows: cost (leasing) + revenue (rental)."""
     c, db_path = client
     trip_id = _setup_trip_env(db_path)
 
     resp = c.put(f"/api/trips/{trip_id}/status", json={"status": "Vahvistettu"})
     assert resp.status_code == 200
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    costs = conn.execute(
-        "SELECT cost_code, amount, cost_type FROM costs WHERE trip_id=?", (trip_id,)
-    ).fetchall()
-    conn.close()
-
-    by_code = {r["cost_code"]: r for r in costs}
+    rows = _trailer_rows(db_path, trip_id)
+    assert [r["cost_code"] for r in rows] == ["400", "400"]
+    by_type = {r["cost_type"]: r for r in rows}
     # loading 2026-11-03, delivery 2026-11-07 → (7−3) + 1 = 5 days
-    assert "400" in by_code
-    assert "401" in by_code
-    assert by_code["400"]["amount"] == 175.0    # 5 × 35.0
-    assert by_code["401"]["amount"] == 270.0    # 5 × 54.0
-    assert by_code["400"]["cost_type"] == "cost"
-    assert by_code["401"]["cost_type"] == "revenue"
+    assert by_type["cost"]["amount"] == 175.0     # 5 × 35.0
+    assert by_type["revenue"]["amount"] == 270.0  # 5 × 54.0
+
+
+def test_trailer_rental_not_duplicated(client):
+    """Re-confirming a trip must not add the trailer rows again."""
+    c, db_path = client
+    trip_id = _setup_trip_env(db_path)
+
+    c.put(f"/api/trips/{trip_id}/status", json={"status": "Vahvistettu"})
+    c.put(f"/api/trips/{trip_id}/status", json={"status": "Suunniteltu"})
+    c.put(f"/api/trips/{trip_id}/status", json={"status": "Vahvistettu"})
+
+    rows = _trailer_rows(db_path, trip_id)
+    assert len(rows) == 2
+
+
+def test_no_legacy_trailer_code(client):
+    c, db_path = client
+    trip_id = _setup_trip_env(db_path)
+    c.put(f"/api/trips/{trip_id}/status", json={"status": "Vahvistettu"})
+    codes = {r["cost_code"] for r in _trailer_rows(db_path, trip_id)}
+    assert "401" not in codes

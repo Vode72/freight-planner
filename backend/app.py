@@ -4,6 +4,8 @@ from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
+from services import run_services_migration
+
 app = Flask(__name__)
 CORS(app)
 
@@ -79,29 +81,6 @@ FERRY_ROUTES = [
     {"route": "Kotka - Antwerpen", "carrier": "Transfennica", "price": 1800},
 ]
 
-COST_CODES = [
-    {"code": "100", "description": "SPOT PRICE", "type": "revenue"},
-    {"code": "120", "description": "FREIGHT", "type": "revenue"},
-    {"code": "200", "description": "POLTTOAINELISÄ", "type": "revenue"},
-    {"code": "210", "description": "KOTIMAAN AJO", "type": "cost"},
-    {"code": "220", "description": "MANTEREEN AJO", "type": "cost"},
-    {"code": "300", "description": "SAKSAN TIEMAKSU", "type": "cost"},
-    {"code": "310", "description": "HOLLANTI + SAKSA TIEMAKSU", "type": "cost"},
-    {"code": "400", "description": "TRAILERVUOKRA (osto)", "type": "cost"},
-    {"code": "401", "description": "TRAILERVUOKRA (myynti)", "type": "revenue"},    
-    {"code": "410", "description": "TRAILERIN TANKKAUS", "type": "cost"},
-    {"code": "500", "description": "LAUTTAKUSTANNUS", "type": "cost"},
-    {"code": "510", "description": "SATAMAMAKSU", "type": "cost"},
-    {"code": "600", "description": "ADR-LISÄ", "type": "cost"},
-    {"code": "610", "description": "LÄMPÖTILALISÄ", "type": "cost"},
-    {"code": "700", "description": "KÄSITTELYMAKSU", "type": "cost"},
-    {"code": "799", "description": "MUUT KULUT", "type": "cost"},
-    {"code": "800", "description": "ODOTUSAIKA", "type": "cost"},
-    {"code": "810", "description": "LISÄKÄSITTELY", "type": "cost"},
-    {"code": "820", "description": "MUU KULU", "type": "cost"},
-    {"code": "830", "description": "TRAILERIN YLIKÄYTTÖ (osto)", "type": "cost"},
-    {"code": "831", "description": "TRAILERIN YLIKÄYTTÖ (myynti)", "type": "revenue"},
-]
 
 PALLET_TYPES = [
     {"type": "FIN-lava", "width": 1.0, "length": 1.2, "height": None},
@@ -136,6 +115,8 @@ def migrate_db():
     for col in fec_cols:
         if col not in existing:
             conn.execute(f"ALTER TABLE trips ADD COLUMN {col} TEXT")
+    # Palvelukoodisto + koodien yhtenäistäminen (401→400, 831→830)
+    run_services_migration(conn)
     conn.commit()
     conn.close()
 
@@ -241,9 +222,36 @@ def get_ferry_routes():
     return jsonify(FERRY_ROUTES)
 
 
+def fetch_services(conn, include_inactive=False):
+    sql = "SELECT code, name, category, default_cost_type, active FROM services"
+    if not include_inactive:
+        sql += " WHERE active = 1"
+    sql += " ORDER BY code"
+    return [dict(r) for r in conn.execute(sql).fetchall()]
+
+
+@app.route("/api/services", methods=["GET"])
+def get_services():
+    include_inactive = request.args.get("all") in ("1", "true")
+    conn = get_db_connection()
+    services = fetch_services(conn, include_inactive)
+    conn.close()
+    for s in services:
+        s["active"] = bool(s["active"])
+    return jsonify(services)
+
+
 @app.route("/api/cost-codes", methods=["GET"])
 def get_cost_codes():
-    return jsonify(COST_CODES)
+    """Vanha muoto {code, description, type} — sama data kuin /api/services."""
+    conn = get_db_connection()
+    services = fetch_services(conn)
+    conn.close()
+    return jsonify([
+        {"code": s["code"], "description": s["name"],
+         "type": s["default_cost_type"], "category": s["category"]}
+        for s in services
+    ])
 
 
 @app.route("/api/pallet-types", methods=["GET"])
@@ -726,7 +734,7 @@ def update_trip_status(trip_id):
             if days > 0 and trip_data["leasing_rate"] and trip_data["rental_rate"]:
                 existing = conn.execute("""
                     SELECT id FROM costs
-                    WHERE trip_id = ? AND cost_code IN ('400', '401')
+                    WHERE trip_id = ? AND cost_code = '400'
                 """, (trip_id,)).fetchone()
 
                 if not existing:
@@ -740,7 +748,7 @@ def update_trip_status(trip_id):
 
                     conn.execute("""
                         INSERT INTO costs (trip_id, cost_code, description, amount, cost_type)
-                        VALUES (?, '401', ?, ?, 'revenue')
+                        VALUES (?, '400', ?, ?, 'revenue')
                     """, (trip_id, f"TRAILERVUOKRA (myynti) {days} pv x {trip_data['rental_rate']} €", myynti))
 
     conn.commit()
@@ -1509,13 +1517,9 @@ def get_costs_dashboard():
     conn = get_db_connection()
 
     # Kulukoodien kategoriaryhmät
-    CATEGORY_CODES = {
-        "lautta":    ["500", "510"],
-        "rahti":     ["100", "120", "200", "210", "220"],
-        "tiemaksut": ["300", "310"],
-        "kalusto":   ["400", "401", "410", "830", "831"],
-        "lisat":     ["600", "610", "700", "799", "800", "810", "820"],
-    }
+    CATEGORY_CODES = {k: [] for k in ("lautta", "rahti", "tiemaksut", "kalusto", "lisat")}
+    for s in fetch_services(conn, include_inactive=True):
+        CATEGORY_CODES.setdefault(s["category"], []).append(s["code"])
 
     # WHERE-ehto loading_date-suodatukselle
     date_filter = ""
@@ -1571,6 +1575,9 @@ def get_costs_dashboard():
     # Kategoriasummat
     categories = {}
     for cat_key, codes in CATEGORY_CODES.items():
+        if not codes:
+            categories[cat_key] = {"osto": 0.0, "myynti": 0.0}
+            continue
         ph = ",".join("?" * len(codes))
         row = conn.execute(f"""
             SELECT

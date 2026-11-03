@@ -6,6 +6,7 @@ from init_db import create_schema, seed_demo_data
 from migrate_restrictions import run_migration as run_restrictions
 from migrate_hallinta import run_migration as run_hallinta
 from migrate_settings import run_migration as run_settings
+from migrate_services import run_migration as run_services
 
 
 def _build_test_db(db_path, with_seed=False):
@@ -20,6 +21,7 @@ def _build_test_db(db_path, with_seed=False):
     run_restrictions(db_path)
     run_hallinta(db_path)
     run_settings(db_path)
+    run_services(db_path)
 
 
 @pytest.fixture

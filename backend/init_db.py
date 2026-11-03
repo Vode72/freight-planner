@@ -1,5 +1,7 @@
 import sqlite3
 
+from services import ensure_services
+
 
 def create_schema(conn):
     """Create all base tables (no DROPs). Safe to call on any connection."""
@@ -177,6 +179,8 @@ CREATE TABLE IF NOT EXISTS fuel_rates (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 )
 """)
+
+    ensure_services(conn)
 
 
 def seed_demo_data(conn):

@@ -12,33 +12,13 @@ const STATUS_COLORS = {
 
 const STATUS_ORDER = ["Suunniteltu", "Vahvistettu", "Käynnissä", "Toimitettu", "Laskutettu"];
 
-const COST_CODES = [
-  { code: "100", description: "SPOT PRICE", type: "revenue" },
-  { code: "120", description: "FREIGHT", type: "revenue" },
-  { code: "200", description: "POLTTOAINELISÄ", type: "revenue" },
-  { code: "210", description: "KOTIMAAN AJO", type: "cost" },
-  { code: "220", description: "MANTEREEN AJO", type: "cost" },
-  { code: "300", description: "SAKSAN TIEMAKSU", type: "cost" },
-  { code: "310", description: "HOLLANTI + SAKSA TIEMAKSU", type: "cost" },
-  { code: "400", description: "TRAILERVUOKRA", type: "cost" },
-  { code: "410", description: "TRAILERIN TANKKAUS", type: "cost" },
-  { code: "500", description: "LAUTTAKUSTANNUS", type: "cost" },
-  { code: "510", description: "SATAMAMAKSU", type: "cost" },
-  { code: "600", description: "ADR-LISÄ", type: "cost" },
-  { code: "610", description: "LÄMPÖTILALISÄ", type: "cost" },
-  { code: "700", description: "KÄSITTELYMAKSU", type: "cost" },
-  { code: "799", description: "MUUT KULUT", type: "cost" },
-  { code: "800", description: "ODOTUSAIKA", type: "cost" },
-  { code: "810", description: "LISÄKÄSITTELY", type: "cost" },
-  { code: "820", description: "MUU KULU", type: "cost" },
-];
-
-const COST_GROUPS = [
-  { key: "lautta",    label: "🚢 Lautta",    codes: ["500", "510"] },
-  { key: "rahti",     label: "🚛 Rahti",     codes: ["100", "120", "200", "210", "220"] },
-  { key: "tiemaksut", label: "🛣️ Tiemaksut", codes: ["300", "310"] },
-  { key: "kalusto",   label: "🚜 Kalusto",   codes: ["400", "401", "410", "830", "831"] },
-  { key: "lisat",     label: "➕ Lisät",     codes: ["600", "610", "700", "799", "800", "810", "820"] },
+// Ryhmien otsikot; ryhmien koodit tulevat /api/services-rajapinnasta (category)
+const COST_GROUP_META = [
+  { key: "lautta",    label: "🚢 Lautta" },
+  { key: "rahti",     label: "🚛 Rahti" },
+  { key: "tiemaksut", label: "🛣️ Tiemaksut" },
+  { key: "kalusto",   label: "🚜 Kalusto" },
+  { key: "lisat",     label: "➕ Lisät" },
 ];
 
 function CapacityBar({ label, value, max, unit }) {
@@ -143,6 +123,22 @@ function TripDetail() {
   const [statusLoading, setStatusLoading] = useState(false);
   const [editingCostId, setEditingCostId] = useState(null);
   const [editForm, setEditForm] = useState({ cost_code: "", description: "", amount: "", cost_type: "cost", custom_description: "" });
+  const [services, setServices] = useState([]);
+
+  useEffect(() => {
+    fetch("http://127.0.0.1:5000/api/services")
+      .then(res => res.json())
+      .then(data => setServices(Array.isArray(data) ? data : []))
+      .catch(err => console.error(err));
+  }, []);
+
+  const costCodes = services.map(s => ({
+    code: s.code, description: s.name, type: s.default_cost_type, category: s.category,
+  }));
+  const costGroups = COST_GROUP_META.map(g => ({
+    ...g,
+    codes: costCodes.filter(c => c.category === g.key).map(c => c.code),
+  }));
 
   const fetchTrip = useCallback(async () => {
     setLoading(true);
@@ -321,7 +317,7 @@ function TripDetail() {
   };
 
   const handleCostCodeChange = (code) => {
-    const found = COST_CODES.find(c => c.code === code);
+    const found = costCodes.find(c => c.code === code);
     setNewCost(prev => ({
       ...prev,
       cost_code: code,
@@ -983,7 +979,7 @@ function TripDetail() {
               const orderCount = trip.orders?.length || 0;
               const ferryTotal = allCosts.filter(c => c.cost_code === "500").reduce((s, c) => s + c.amount, 0);
               const ferryPerOrder = orderCount > 1 && ferryTotal > 0 ? ferryTotal / orderCount : null;
-              const groupedIds = new Set(COST_GROUPS.flatMap(g => g.codes));
+              const groupedIds = new Set(costGroups.flatMap(g => g.codes));
 
               const renderCostRow = (cost) => {
                 const isEditing = editingCostId === cost.id;
@@ -999,12 +995,12 @@ function TripDetail() {
                       <select
                         value={editForm.cost_code}
                         onChange={e => {
-                          const f = COST_CODES.find(c => c.code === e.target.value);
+                          const f = costCodes.find(c => c.code === e.target.value);
                           setEditForm(ef => ({ ...ef, cost_code: e.target.value, description: f ? f.description : ef.description, cost_type: f ? f.type : ef.cost_type }));
                         }}
                         style={{ ...inputStyle, fontSize: "12px", padding: "4px 6px" }}
                       >
-                        {COST_CODES.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
+                        {costCodes.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
                       </select>
                       <input
                         type="text"
@@ -1054,7 +1050,7 @@ function TripDetail() {
 
               return (
                 <div style={{ marginBottom: "16px" }}>
-                  {COST_GROUPS.map(group => {
+                  {costGroups.map(group => {
                     const rows = allCosts.filter(c => group.codes.includes(c.cost_code));
                     if (rows.length === 0) return null;
                     const gRev = rows.filter(c => c.cost_type === "revenue").reduce((s, c) => s + c.amount, 0);
@@ -1132,7 +1128,7 @@ function TripDetail() {
                       <div>
                         <div style={{ color: "#94a3b8", fontSize: "12px", marginBottom: "4px" }}>Kulukoodi</div>
                         <select value={newCost.cost_code} onChange={(e) => handleCostCodeChange(e.target.value)} style={{ ...inputStyle, width: "100%" }}>
-                          {COST_CODES.map(c => <option key={c.code} value={c.code}>{c.code} — {c.description}</option>)}
+                          {costCodes.map(c => <option key={c.code} value={c.code}>{c.code} — {c.description}</option>)}
                         </select>
                       </div>
                       <div>

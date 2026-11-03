@@ -54,6 +54,11 @@ orders:
 costs:
   trip_id, cost_code, description, amount, cost_type (cost/revenue), custom_description
 
+services: ✅ VALMIS (issue #2, hinnoittelun vaihe 1)
+  code (PK), name, category, default_cost_type, active
+  Koodisto: backend/services.py (SERVICES). create_schema(), migrate_services.py
+  ja app.migrate_db() ajavat ensure_services() + merge_legacy_codes() (idempotentti).
+
 fuel_rates: ✅ VALMIS
   id, valid_from, valid_to, multiplier
   Demo: 5 kk tammi-touko 2026
@@ -198,7 +203,8 @@ VALMIIT API-ENDPOINTIT
 Auth:       POST /api/login
 Reference:  GET /api/trailer-types, /api/trailer-specs, /api/incoterms
             GET /api/transport-types, /api/statuses, /api/ferry-routes
-            GET /api/cost-codes, /api/pallet-types, /api/next-order-reference
+            GET /api/services (?all=1 = myös passiiviset)
+            GET /api/cost-codes (sama data vanhassa muodossa), /api/pallet-types, /api/next-order-reference
 Trailers:   GET /api/trailers
             POST /api/trailers
             PUT /api/trailers/:id
@@ -284,7 +290,7 @@ BISNESLOGIIKKA
 
 STATUS-KETJU: Suunniteltu → Vahvistettu → Käynnissä → Toimitettu → Laskutettu
 - Laskutettu = lukittu, ei muutoksia
-- Vahvistus → automaattinen trailervuokra (400 osto + 401 myynti)
+- Vahvistus → automaattinen trailervuokra (kaksi 400-riviä: cost + revenue)
 - Toimitettu → delivered_at timestamp asetetaan automaattisesti (OTD-laskenta)
 
 CREDIT NOTE (hyvityslasku):
@@ -301,12 +307,17 @@ LAUTTAREITIT:
 - Kotka - Antwerpen (Transfennica) 1800€
 (Siirretään myöhemmin ferry_rates-tauluun hallittavaksi)
 
-KULUKOODIT: 100(SPOT), 120(FREIGHT), 200(POLTTOAINELISÄ),
-210(KOTIMAAN AJO), 220(MANTEREEN AJO), 300(SAKSAN TIEMAKSU),
-310(HOLLANTI+SAKSA), 400(TRAILERVUOKRA osto), 401(myynti),
-410(TANKKAUS), 500(LAUTTA), 510(SATAMA), 600(ADR), 610(LÄMPÖTILA),
-700(KÄSITTELY), 799(MUUT), 800(ODOTUS), 810(LISÄKÄSITTELY),
-820(MUU), 830(YLIKÄYTTÖ osto), 831(myynti)
+PALVELUKOODIT (services-taulu, docs/pricing-engine-spec.md luku 6):
+Koodi = palvelu, cost_type = suunta. Sama koodi sekä osto- että myyntirivillä.
+401 → 400 ja 831 → 830 yhdistetty (vanhat costs-rivit migroitu, cost_type säilyi).
+Rahti:     100 SPOT, 120 FREIGHT, 200 POLTTOAINELISÄ, 210/211/212 KOTIMAAN AJO
+           KUORMATTU/TYHJÄ/VETOYKSIKKÖ, 220/221/222 MANTEREEN ..., 230 LIIKKUVUUSPAKETTILISÄ
+Tiemaksut: 300 SAKSA, 310 HOLLANTI+SAKSA, 320 ITÄVALTA, 330 RANSKA, 340 SVEITSI, 350 PUOLA
+Kalusto:   400 TRAILERVUOKRA, 410 TANKKAUS, 830 YLIKÄYTTÖ
+Lautta:    500 LAUTTA, 510 SATAMAMAKSU, 520 BAF, 530 ETS, 540 MARPOL
+Lisät:     600 ADR, 610 LÄMPÖTILA, 700 KÄSITTELY, 720 HALLINNOINTIMAKSU,
+           799 MUUT, 800 ODOTUS, 810 LISÄKÄSITTELY, 820 MUU
+Oletus revenue: 100, 120, 200, 230, 720 — muut cost.
 
 POLTTOAINELISÄ-LOGIIKKA:
 - FREIGHT (120) → lisätään automaattisesti POLTTOAINELISÄ (200)
@@ -501,12 +512,10 @@ TULOSSA:
 - Raportit-näkymä (carrier-kannattavuus, OTD, täyttöasteet)
 - Power BI API-endpointit
 
-KULUJEN RYHMITTELY UI:SSA:
-  🚢 Lautta (500, 510)
-  🚛 Rahti (100, 120, 200, 210, 220)
-  🛣️ Tiemaksut (300, 310)
-  🚜 Kalusto (400, 401, 410, 830, 831)
-  ➕ Lisät (600, 610, 700, 799, 800, 810, 820)
+KULUJEN RYHMITTELY UI:SSA (services.category, haetaan /api/services):
+  🚢 Lautta (lautta)  🚛 Rahti (rahti)  🛣️ Tiemaksut (tiemaksut)
+  🚜 Kalusto (kalusto)  ➕ Lisät (lisat)
+  TripDetail.js ja costs-dashboard eivät enää sisällä kovakoodattuja listoja.
 
 RAKENNUSJÄRJESTYS:
 ✅ 1. Tietokantamuutokset (trips + fuel_rates)
