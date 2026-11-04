@@ -72,6 +72,7 @@ HINNOITTELUMOOTTORIN BACKLOG (docs/pricing-engine-spec.md v1.1, label pricing):
   (TripDetail: Kulut/Myynti/Kate, OrderDetail: Hinnoittelu/Costing) ·
   #9 kate ja raportit ("sisältyy muihin kuluihin") · #13 km:t kartalta
   (OpenRouteService) · #14 ✅ demodata + freight.db pois gitistä ·
+  #20 ✅ dashboardin summat eivät enää kerrotu orderien määrällä ·
   #15 käyttäjät ja roolit (oikeusmatriisi spec luku 16)
 
 services: ✅ VALMIS (issue #2, hinnoittelun vaihe 1)
@@ -224,6 +225,8 @@ App.js            — sidebar-layout, reititys, nested routes (URL-parametri :ta
                     TripDetail reititys: /trips/:id/:tab (orders/cargo/schedule/costs)
 Dashboard.js      — ✅ sidebarin ensimmäinen (📊):
                     5 KPI-korttia, status-jako, keikkataulukko kateprosentteineen
+                    ✅ #20: /api/dashboard aggregoi orders ja costs alikyselyissä
+                       ennen liitosta (ei karteesista tuloa); KPI = costs-dashboardin KPI
 TripList.js       — datataulukko, haku, sorttaus, ⋮-menu
                     ✅ Trip ID -solun vasen reuna värikoodattu statuksen mukaan:
                        sininen/keltainen/oranssi/vihreä/harmaa
