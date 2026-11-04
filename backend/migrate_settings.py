@@ -41,4 +41,5 @@ CREATE TABLE IF NOT EXISTS settings (
 
 
 if __name__ == "__main__":
-    run_migration("freight.db")
+    from db_config import get_db_path
+    run_migration(get_db_path())

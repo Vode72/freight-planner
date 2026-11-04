@@ -118,7 +118,7 @@ Python Flask
 
 ### 🚐 Hallinta — Kalusto & Kumppanit
 - **Carriers:** 6 companies, trucks inline, status changes directly in list
-- **Trailers:** 12 trailers (TIP Trailer Services), type filter, leasing/rental rates
+- **Trailers:** 12 trailers (Demo Trailer Leasing Oy), type filter, leasing/rental rates
   - Inspection tracking: next due date with alert badges 🔴/🟠/🟡/✅
   - Refrigeration service tracking (thermo trailers only)
   - Maintenance history log per trailer
@@ -180,13 +180,31 @@ python -m venv venv
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # Mac/Linux
 pip install -r requirements.txt
-python init_db.py
-python migrate_restrictions.py
-python migrate_hallinta.py
-python migrate_settings.py
+python reset_demo.py          # fresh demo database (schema + migrations + demo data)
 python app.py
 ```
 Backend runs at `http://127.0.0.1:5000`
+
+`reset_demo.py` deletes the database file and rebuilds it from scratch, so it can be
+re-run at any time to get a clean demo state. The database is not under version control.
+
+**Environment variables**
+
+| Variable | Default | Description |
+|---|---|---|
+| `FREIGHT_DB_PATH` | `backend/freight.db` | SQLite database path used by `app.py`, `reset_demo.py` and the migration scripts |
+
+```bash
+FREIGHT_DB_PATH=/tmp/freight-demo.db python reset_demo.py   # Mac/Linux
+set FREIGHT_DB_PATH=C:\temp\freight-demo.db                  # Windows (cmd)
+```
+
+**Tests**
+```bash
+cd backend
+pytest tests/ -v
+```
+Tests always use a temporary database and never touch `backend/freight.db`.
 
 **3. Set up frontend**
 ```bash
@@ -209,7 +227,9 @@ freight-planner/
 ├── backend/
 │   ├── app.py                    # Flask REST API
 │   ├── restriction_engine.py     # Driving ban rule engine
-│   ├── init_db.py                # Database setup + seed data
+│   ├── db_config.py              # Database path (FREIGHT_DB_PATH)
+│   ├── reset_demo.py             # One-command clean demo database
+│   ├── init_db.py                # Schema + seed data
 │   ├── migrate_restrictions.py   # Country restrictions + terminals
 │   ├── migrate_hallinta.py       # Trailer maintenance + km/ferry rates
 │   ├── migrate_settings.py       # Settings table
@@ -248,7 +268,7 @@ freight-planner/
 | costs | Cost/revenue lines per trip (20+ cost codes) |
 | carriers | 6 fictional carrier companies |
 | trucks | 12 drivers (2 per carrier) |
-| trailers | 12 trailers — TIP Trailer Services, 5 types |
+| trailers | 12 trailers — Demo Trailer Leasing Oy, 5 types |
 | trailer_maintenance | Inspection and service history per trailer |
 | customers | Customer registry (consignor/consignee/both) |
 | country_restrictions | Driving ban rules per country |
@@ -289,6 +309,7 @@ freight-planner/
 - Trip, Order & Cost Management
 - Fleet & Trailer Management (inspection + service tracking)
 - Customer Registry
+- Realistic demo data (fictional "Demo" companies, 8–20 % trip margins) + one-command reset
 - Pricing Management (fuel, km, ferry rates)
 - Country Restriction Engine (9 countries, 15 rules)
 - Driver Mobile Workflow (FEC check-in)

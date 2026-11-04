@@ -17,11 +17,16 @@ from customer_pricing import (
     find_rate_card_overlap, find_billing_rule_overlap,
     billing_rule_as_dict, RATE_CARD_COLUMNS, BILLING_RULE_COLUMNS,
 )
+from db_config import get_db_path
 
 app = Flask(__name__)
 CORS(app)
 
-DB_NAME = "freight.db"
+# Tietokantapolku: FREIGHT_DB_PATH tai oletuksena backend/freight.db.
+# Testit asettavat DB_NAME:n suoraan tmp_path-kantaan.
+DB_NAME = get_db_path()
+
+DEFAULT_LEASING_COMPANY = "Demo Trailer Leasing Oy"
 
 TRAILER_SPECS = {
     "Umpikaappi": {
@@ -87,10 +92,10 @@ TRANSPORT_TYPES = ["Suora", "Terminaalin kautta", "Groupage"]
 STATUSES = ["Suunniteltu", "Vahvistettu", "Käynnissä", "Toimitettu", "Laskutettu"]
 
 FERRY_ROUTES = [
-    {"route": "Helsinki - Travemünde", "carrier": "Finnlines", "price": 1050},
-    {"route": "Hanko - Lübeck", "carrier": "Transfennica", "price": 1010},
-    {"route": "Hanko - Rostock", "carrier": "Finnlines", "price": 750},
-    {"route": "Kotka - Antwerpen", "carrier": "Transfennica", "price": 1800},
+    {"route": "Helsinki - Travemünde", "carrier": "Demo Ferries", "price": 1050},
+    {"route": "Hanko - Lübeck", "carrier": "Demo Baltic Line", "price": 1010},
+    {"route": "Hanko - Rostock", "carrier": "Demo Ferries", "price": 750},
+    {"route": "Kotka - Antwerpen", "carrier": "Demo Baltic Line", "price": 1800},
 ]
 
 
@@ -117,10 +122,14 @@ def get_db_connection():
     return conn
 
 
-def migrate_db():
-    if not os.path.exists(DB_NAME):
+def migrate_db(db_path=None):
+    """Idempotentti käynnistysmigraatio. Ajetaan vain käynnistyksessä,
+    ei moduulin importissa (testit ja skriptit eivät koske oikeaan kantaan)."""
+    db_path = db_path or DB_NAME
+    if not os.path.exists(db_path):
         return
-    conn = get_db_connection()
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
     existing = {row[1] for row in conn.execute("PRAGMA table_info(trips)").fetchall()}
     fec_cols = ["loading_started_at", "loading_completed_at",
                 "delivery_started_at", "delivery_completed_at", "delivered_at"]
@@ -136,7 +145,6 @@ def migrate_db():
     conn.commit()
     conn.close()
 
-migrate_db()
 
 
 def calculate_loading_meters(width, length, quantity):
@@ -306,7 +314,7 @@ def create_trailer():
         data.get("plate_number"),
         data.get("identifier", ""),
         data.get("trailer_type"),
-        data.get("leasing_company", "TIP Trailer Services"),
+        data.get("leasing_company", DEFAULT_LEASING_COMPANY),
         float(data.get("leasing_rate", 0)),
         float(data.get("rental_rate", 0)),
         data.get("status", "Vapaa")
@@ -332,7 +340,7 @@ def update_trailer(trailer_id):
         data.get("plate_number"),
         data.get("identifier", ""),
         data.get("trailer_type"),
-        data.get("leasing_company", "TIP Trailer Services"),
+        data.get("leasing_company", DEFAULT_LEASING_COMPANY),
         float(data.get("leasing_rate", 0)),
         float(data.get("rental_rate", 0)),
         data.get("status", "Vapaa"),
@@ -2465,4 +2473,5 @@ def update_settings():
 
 
 if __name__ == "__main__":
+    migrate_db()
     app.run(debug=True)

@@ -13,13 +13,7 @@ cd backend
 python -m venv venv
 venv\Scripts\activate        # Windows
 pip install -r requirements.txt
-python init_db.py
-python migrate_restrictions.py
-python migrate_hallinta.py
-python migrate_settings.py
-python migrate_services.py
-python migrate_surcharges.py
-python migrate_customer_pricing.py
+python reset_demo.py          # puhdas demokanta: skeema + migraatiot + demodata
 python app.py                 # http://127.0.0.1:5000
 
 # Frontend
@@ -32,13 +26,19 @@ Kirjautuminen: `demo` / `freight2024`
 
 ---
 
-## Tietokannan ensiasennus
+## Tietokanta
 
-Aja järjestyksessä `backend/`-hakemistossa:
+- Polku: ympäristömuuttuja `FREIGHT_DB_PATH`, oletus `backend/freight.db` (`db_config.get_db_path()`).
+- `freight.db` **ei ole versionhallinnassa** — luo se komennolla `python reset_demo.py [polku]`.
+  Skripti poistaa kantatiedoston ja ajaa alla olevat vaiheet + `app.migrate_db()`.
+- Testit eivät koske `backend/freight.db`:hen: `conftest.py` ohjaa `FREIGHT_DB_PATH`:n
+  tmp-hakemistoon ja session-vartija tarkistaa, ettei tiedosto muutu.
+
+`reset_demo.py` ajaa nämä järjestyksessä (yksittäin ajettavissa `backend/`-hakemistossa):
 
 | Skripti | Luo |
 |---|---|
-| `python init_db.py` | Perustaulut + demodataa (7 trippiä, 12 orderia, 15 kustannusriviä) |
+| `python init_db.py` | Perustaulut + demodataa (7 trippiä, 12 orderia, 50 kustannusriviä, katteet 8–20 %) |
 | `python migrate_restrictions.py` | country_restrictions, terminals, trips.tail_lift_unloading |
 | `python migrate_hallinta.py` | trailer_maintenance, km_rates, ferry_rates, trailerin huoltosarakkeet |
 | `python migrate_settings.py` | settings (yritystiedot + hälytyskonfiguraatio) |
@@ -46,7 +46,7 @@ Aja järjestyksessä `backend/`-hakemistossa:
 | `python migrate_surcharges.py` | surcharge_rates (lisähinnat) + demodata tyhjään tauluun + fuel_rates → surcharge_rates (200) |
 | `python migrate_customer_pricing.py` | customer_rate_cards + customer_billing_rules + demodata (Nordic Demo Plastics Oy, Baltic Demo Trading Oy) |
 
-`app.py` ajaa käynnistyessään `migrate_db()` joka lisää FEC-timestampit automaattisesti
+`app.py` ajaa käynnistyessään (`python app.py`, ei importissa) `migrate_db()` joka lisää FEC-timestampit automaattisesti
 jos niitä ei vielä ole, sekä palvelukoodiston (`services.py`), lisähintojen (`surcharges.py`) ja asiakashinnoittelun (`customer_pricing.py`) migraation
 (idempotent, turvallinen uudelleenajoon).
 
@@ -78,6 +78,8 @@ freight-planner/
 │   ├── services.py               # Palvelukoodisto (SERVICES) + migraatiofunktiot
 │   ├── surcharges.py             # Lisähinnat: calculate_surcharge, derive_trade_type, demodata
 │   ├── customer_pricing.py       # Asiakashinnasto + lisäsäännöt: find_rate_card, get_billing_rule
+│   ├── db_config.py              # get_db_path(): FREIGHT_DB_PATH / backend/freight.db
+│   ├── reset_demo.py             # Puhdas demokanta yhdellä komennolla
 │   ├── init_db.py                # create_schema() + seed_demo_data() + reset_db()
 │   ├── migrate_restrictions.py   # country_restrictions, terminals
 │   ├── migrate_hallinta.py       # trailer_maintenance, km_rates, ferry_rates
@@ -94,7 +96,9 @@ freight-planner/
 │       ├── test_surcharges.py    # Lisähintojen laskenta, hakujärjestys, voimassaolo, CRUD
 │       ├── test_fuel_migration.py # Polttoainelisän siirto, summien vastaavuus, /api/fuel-rates
 │       ├── test_customer_pricing.py # Asiakashinnasto (zip/maa-haku, voimassaolo), lisäsäännöt, CRUD
-│       └── test_costs.py        # Kustannuslogiikan testit
+│       ├── test_costs.py        # Kustannuslogiikan testit
+│       ├── test_demo_data.py    # Demonimet ("Demo"), katteet 8–20 %, spot, 400-rivit
+│       └── test_db_path.py      # FREIGHT_DB_PATH, ei migraatiota importissa, reset_demo
 └── frontend/
     └── src/
         ├── App.js                # Sidebar-layout, reititys
