@@ -59,7 +59,9 @@ costs:
 
 orders ── TULOSSA (spec v1.1, #6):
   pricing_type, product_type, chargeable_weight,
-  payer_customer_id — oletus incotermsista: DAP/DDP/CPT/CIP → lähettäjä,
+  consignor_customer_id, consignee_customer_id (automaattitäydennys tallentaa,
+  vanhat linkitetään migraatiossa täsmällisellä nimellä),
+  payer_customer_id — oletus incotermsista tunnisteiden kautta: DAP/DDP/CPT/CIP → lähettäjä,
   EXW/FCA → vastaanottaja, muokattavissa
 
 HINNOITTELUMOOTTORIN BACKLOG (docs/pricing-engine-spec.md v1.1, label pricing):
