@@ -2,10 +2,10 @@ import React, { useState } from "react";
 
 const FERRY_ROUTES = [
   { route: "Ei lauttaa", price: 0 },
-  { route: "Helsinki - Travemünde (Finnlines)", price: 1050 },
-  { route: "Hanko - Lübeck (Transfennica)", price: 1010 },
-  { route: "Hanko - Rostock (Finnlines)", price: 750 },
-  { route: "Kotka - Antwerpen (Transfennica)", price: 1800 },
+  { route: "Helsinki - Travemünde (Demo Ferries)", price: 1050 },
+  { route: "Hanko - Lübeck (Demo Baltic Line)", price: 1010 },
+  { route: "Hanko - Rostock (Demo Ferries)", price: 750 },
+  { route: "Kotka - Antwerpen (Demo Baltic Line)", price: 1800 },
 ];
 
 const DEFAULT_RATES = {

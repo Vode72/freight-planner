@@ -12,7 +12,8 @@ Kaikki data on keksittyä demodataa — ei oikeita asiakasnimiä, rekkareita tai
 TEKNINEN STACK:
 - Frontend: React 18, JavaScript, inline CSS
 - Teema: tumma #0f172a, oranssi aksentti #f97316
-- Backend: Python Flask, SQLite (freight.db)
+- Backend: Python Flask, SQLite (freight.db, polku FREIGHT_DB_PATH tai backend/freight.db,
+  ei versionhallinnassa — luodaan: python reset_demo.py)
 - REST API: http://127.0.0.1:5000
 - Frontend: http://localhost:3000
 - GitHub: github.com/Vode72/freight-planner
@@ -70,7 +71,7 @@ HINNOITTELUMOOTTORIN BACKLOG (docs/pricing-engine-spec.md v1.1, label pricing):
   tyhjä ajo, trailervuokra FEC-päivillä, vastakirjaus) · #8 käyttöliittymät
   (TripDetail: Kulut/Myynti/Kate, OrderDetail: Hinnoittelu/Costing) ·
   #9 kate ja raportit ("sisältyy muihin kuluihin") · #13 km:t kartalta
-  (OpenRouteService) · #14 demodata + freight.db pois gitistä ·
+  (OpenRouteService) · #14 ✅ demodata + freight.db pois gitistä ·
   #15 käyttäjät ja roolit (oikeusmatriisi spec luku 16)
 
 services: ✅ VALMIS (issue #2, hinnoittelun vaihe 1)
@@ -130,7 +131,7 @@ fuel_rates: ⚠️ VANHENTUNUT — vain siirron lähde, koodi ei lue tai kirjoit
   Taulu poistetaan UI-vaiheessa (FuelRateManager → Hinnoittelu → Lisät).
   Hallitaan edelleen Hallinta-osiossa (⛽ Polttoainekerroin) /api/fuel-rates-kautta.
 
-trailers: (12 kpl TIP Trailer Services)
+trailers: (12 kpl Demo Trailer Leasing Oy)
   plate_number, identifier, trailer_type, leasing_rate, rental_rate, status
   Tyypit: Umpikaappi (42/65€), Sivuaukeava (45/70€),
           Umpikaappi 2-koneinen (43/67€), Pressutrailer (35/54€), Megatrailer (38/59€)
@@ -148,6 +149,8 @@ trailer_maintenance: ✅ VALMIS
   (historia kaikista huolloista ja katsastuksista)
 
 carriers: (6 kuljetusyhtiötä — 3 FI, 3 EU)
+  Demo Kuljetus Helsinki Oy, Demo Road Turku Oy, Pohjois-Demo Kuljetus Oy,
+  Demo Trans GmbH, Demo Cargo BV, Demo Logistics AB
   name, country, city, business_id, contact_person, phone
   ── TULOSSA: vat_number ──
 
@@ -160,8 +163,17 @@ customers: ✅ VALMIS
   name, address, country, zip, city,
   contact_person, phone, email,
   customer_type (consignor/consignee/both), notes
-  Demo-asiakkaat: Nordic Demo Plastics Oy, Baltic Demo Foods Oy,
-                  Demo Retail Finland Oy, Euro Demo GmbH, Continental Demo BV
+  Demo-asiakkaat (init_db): Demo Retail Finland Oy, Demo Rakennustarvike Oy,
+                  Demo Päivittäistavara Oy, Demo Machinery Finland Oy,
+                  Baltic Demo Foods Oy, Demo Cranes Oy, Demo Shipyard Turku Oy,
+                  Demo Paper Oy
+  Hinnastoasiakkaat (customer_pricing): Nordic Demo Plastics Oy, Baltic Demo Trading Oy
+  Vastaanottajat (orders): Demo Stahl AG, Demo Karton GmbH, Demo Livs AB,
+                  Demo Chemicals NV, Demo Bouwmarkt BV, Demo Scheepswerf BV,
+                  Demo Papier GmbH, Demo Kranbau GmbH, Demo Kaubandus AS,
+                  Demo Budowa Sp. z o.o., Demo Maszyny SA, Demo Dagligvare AS
+  Sääntö: kaikissa demonimissä sana "Demo", sähköpostit *.example.com
+  (tests/test_demo_data.py valvoo)
 
 country_restrictions: ✅ VALMIS
   id, country_code, restriction_type, day_of_week,
@@ -182,12 +194,22 @@ settings: ── TULOSSA ──
   forwarder_name, forwarder_address, forwarder_contact
   (käytetään Transport Orderissa, CMR:ssä)
 
-init_db.py sisältää nyt demodata:
+init_db.py sisältää demodatan (issue #14):
   - 7 demo-trippiä (TRP-2026-001..007) eri statuksilla
-  - 12 orderia realistisilla tiedoilla
-  - 15 kustannusriviä neljälle tripille
+  - 12 orderia, kaikki osapuolet keksittyjä Demo-yrityksiä
+  - 50 kustannusriviä, jokaisella keikalla kate 8–20 %
+    (120 + 200 19 % + 400 myynti; kulut 210/220/300–350/500/510/400)
+  - TRP-2026-005 on spot: myynti vain koodi 100, 400 vain kuluna
+  - Suunnitelluilla keikoilla ei 400-rivejä (vahvistusautomaatti lisää)
   - 5 fuel_rates-riviä (tammi-touko 2026)
-  (carriers 6kpl, trailers 12kpl, customers 8kpl ennallaan)
+  (carriers 6kpl, trailers 12kpl, customers 8kpl)
+
+PUHDAS DEMOKANTA: cd backend && python reset_demo.py [polku.db]
+  Poistaa kantatiedoston ja ajaa: create_schema + seed_demo_data + kaikki
+  migrate_*.py + app.migrate_db(). Kohde: argumentti > FREIGHT_DB_PATH > backend/freight.db.
+  app.migrate_db() ajetaan vain käynnistyksessä (python app.py), ei importissa.
+  Testit: conftest ohjaa FREIGHT_DB_PATH:n tmp-hakemistoon ja session-vartija
+  varmistaa ettei backend/freight.db muutu (tests/test_db_path.py).
 
 ============================================================
 VALMIIT KOMPONENTIT
@@ -376,10 +398,10 @@ CREDIT NOTE (hyvityslasku):
 - Toteutetaan CMR + Transport Order -paketin yhteydessä
 
 LAUTTAREITIT:
-- Helsinki - Travemünde (Finnlines) 1050€
-- Hanko - Lübeck (Transfennica) 1010€
-- Hanko - Rostock (Finnlines) 750€
-- Kotka - Antwerpen (Transfennica) 1800€
+- Helsinki - Travemünde (Demo Ferries) 1050€
+- Hanko - Lübeck (Demo Baltic Line) 1010€
+- Hanko - Rostock (Demo Ferries) 750€
+- Kotka - Antwerpen (Demo Baltic Line) 1800€
 (Siirretään myöhemmin ferry_rates-tauluun hallittavaksi)
 
 PALVELUKOODIT (services-taulu, docs/pricing-engine-spec.md luku 6):
@@ -843,7 +865,8 @@ TULEVA KEHITYS
 GIT-Tilanne
 ============================================================
 GitHub: github.com/Vode72/freight-planner
-.gitignore: node_modules/ ja freight.db jätetään pois
+.gitignore: node_modules/, frontend/build/, __pycache__/ ja backend/freight.db jätetään pois
+(freight.db, build ja .pyc poistettu versionhallinnasta issuessa #14; historiaa ei siivottu)
 Viimeisin commit: Feature 7B — Asetukset-sivu (settings-taulu, yritystiedot, ilmoitukset)
 
 ============================================================

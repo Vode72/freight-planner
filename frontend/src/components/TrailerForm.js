@@ -10,7 +10,7 @@ function TrailerForm() {
   const navigate = useNavigate();
   const [form, setForm] = useState({
     plate_number: "", identifier: "", trailer_type: "Umpikaappi",
-    leasing_company: "TIP Trailer Services", leasing_rate: "", rental_rate: "", status: "Vapaa"
+    leasing_company: "Demo Trailer Leasing Oy", leasing_rate: "", rental_rate: "", status: "Vapaa"
   });
   const toast = useToast();
   const [saving, setSaving] = useState(false);

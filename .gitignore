@@ -9,3 +9,9 @@ venv/
 .idea/
 Thumbs.db
 .DS_Store
+
+# Paikallinen tietokanta (luodaan: python reset_demo.py)
+backend/freight.db
+*.db-journal
+*.db-wal
+*.db-shm
