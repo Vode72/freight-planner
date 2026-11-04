@@ -12,9 +12,9 @@
 |---|---|---|
 | 1 | Lisähinnoilla pakollinen `cost_type` (toteutettu #3) | 7.2, 13 |
 | 2 | Uusi rate_type `pass_through` asiakassääntöihin | 7.1, 8.2 |
-| 3 | Maksaja `orders.payer_customer_id`, oletus toimitusehdosta | 8.3, 9 |
+| 3 | Maksaja `orders.payer_customer_id`, oletus toimitusehdosta; osapuolet linkitetty tunnisteilla `consignor_customer_id` / `consignee_customer_id` | 8.3, 9, 13 |
 | 4 | Mantereen vetäjä `trips.continent_carrier_id` + `continent_truck_plate` | 10.1 |
-| 5 | Tyhjän ajon määritelmä ja kohdistus | 10.2 |
+| 5 | Tyhjän ajon määritelmä ja kohdistus (kotimaa `truck_plate`, manner `continent_truck_plate`) | 10.2 |
 | 6 | Trailervuokran uudelleenlaskenta toteutuneilla päivillä | 10.3 |
 | 7 | Lukitun keikan korjaus vastakirjauksella (`costs.reversal_of_id`) | 11.2 |
 | 8 | `costs.created_by` ja `costs.reversed_by` | 11.2, 13 |
@@ -262,9 +262,12 @@ Tilauksella on maksaja, jonka hinnastolla ja lisäsäännöillä se hinnoitellaa
 | EXW, FCA | vastaanottaja (consignee) |
 | muu tai tyhjä | ei oletusta, valitaan käsin |
 
+- Lähettäjä ja vastaanottaja linkitetään asiakasrekisteriin tunnisteilla `orders.consignor_customer_id` ja `orders.consignee_customer_id`. OrderFormin automaattitäydennys tallentaa valitun asiakkaan tunnisteen nimen ja osoitteen lisäksi.
+- Oletus päätellään **tunnisteista, ei nimistä**: lähettäjä → `consignor_customer_id`, vastaanottaja → `consignee_customer_id`.
 - Oletus asetetaan, kun tilaus luodaan tai toimitusehto vaihtuu, jos dispatcher ei ole valinnut maksajaa käsin.
 - Maksaja on aina muokattavissa OrderFormissa (asiakasrekisterin asiakas).
-- Jos lähettäjää/vastaanottajaa vastaavaa asiakasta ei löydy rekisteristä, maksaja jää tyhjäksi ja "Laske hinta" pyytää valitsemaan sen.
+- Jos oletuksen mukainen tunniste on tyhjä (osapuoli ei ole rekisterissä), maksaja jää tyhjäksi ja "Laske hinta" pyytää valitsemaan sen.
+- **Vanhat tilaukset:** kertaluonteinen migraatio (kirjataan `schema_migrations`-tauluun) linkittää `consignor_name`/`consignee_name` asiakkaaseen vain, kun nimi vastaa asiakkaan nimeä täsmälleen. Muut jäävät tyhjiksi.
 - Maksajan vaihto ei muuta jo tallennettuja rivejä; hinta lasketaan uudelleen "Laske hinta" -painikkeella.
 
 ---
@@ -287,7 +290,7 @@ Tilaus tallennetaan / dispatcher painaa "Laske hinta"
   └─ Näytä ehdotus → dispatcher muokkaa / hyväksyy → tallennus
 ```
 
-Tilaukselle tarvitaan uudet kentät: `pricing_type` (contract/spot), `product_type` (FTL/LTL), `chargeable_weight`, `payer_customer_id`.
+Tilaukselle tarvitaan uudet kentät: `pricing_type` (contract/spot), `product_type` (FTL/LTL), `chargeable_weight`, `consignor_customer_id`, `consignee_customer_id`, `payer_customer_id`.
 
 ---
 
@@ -321,7 +324,9 @@ Km-hinnat haetaan kummankin vetäjän omasta hinnastosta (`km_rates.carrier_id`,
 
 Tyhjä ajo on siirtymä **edellisen keikan purkupaikalta tämän keikan lastauspaikalle**, ja sen kulu kohdistuu **lastattavalle keikalle** (sille keikalle, jota varten siirrytään).
 
-- Edellinen keikka = saman vetoyksikön (rekisterinumero, kotimaa ja manner erikseen) edellinen keikka lastauspäivän mukaan.
+- Edellinen keikka = saman vetoyksikön edellinen keikka lastauspäivän mukaan, kotimaa ja manner erikseen:
+  - kotimaan osuus (211): saman `truck_plate`n edellinen keikka
+  - mantereen osuus (221): saman `continent_truck_plate`n edellinen keikka
 - Jos edellistä keikkaa ei ole, tyhjä ajo lasketaan vetäjän lähtöpisteestä tai syötetään käsin.
 - Purkupaikan jälkeinen paluu ei kuulu purettavalle keikalle; se kirjataan seuraavalle keikalle, kun sellainen on.
 
@@ -453,6 +458,7 @@ users                             -- #15, luku 16
 
 ```
 orders:   + pricing_type, product_type, chargeable_weight,
+            consignor_customer_id, consignee_customer_id,
             payer_customer_id (→ customers)
 costs:    + order_id (nullable), line_type (invoice/info), is_auto,
             reversal_of_id (→ costs, nullable),
