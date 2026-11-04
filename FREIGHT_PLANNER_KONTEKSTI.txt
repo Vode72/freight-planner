@@ -59,6 +59,21 @@ services: ✅ VALMIS (issue #2, hinnoittelun vaihe 1)
   Koodisto: backend/services.py (SERVICES). create_schema(), migrate_services.py
   ja app.migrate_db() ajavat ensure_services() + merge_legacy_codes() (idempotentti).
 
+surcharge_rates: ✅ VALMIS (issue #3, hinnoittelun vaihe 2)
+  id, service_code, cost_type (revenue/cost, pakollinen), trade_type, product_type,
+  country, operator, rate_type (percent/fixed/per_100kg/per_km), rate,
+  min_amount, max_amount, valid_from, valid_to
+  Logiikka: backend/surcharges.py — calculate_surcharge(service_code, context, conn),
+  select_rate(), derive_trade_type(). Tyhjä kohdistuskenttä = kaikki; tarkin voittaa
+  (maa 8 > tuote 4 > operaattori 2 > suunta 1). Ei hintaa → None.
+  Asiakkaan sopimuslisä (hakujärjestyksen kohta 1) tulee vaiheessa 4.
+  Demo: 230 liikkuvuuspaketti (revenue, EXP+IMP: BE 9, NL 9, DE 8, FR 10, PL 7 %),
+        530 ETS (revenue 120 € 2025 / 150 € 2026-, cost 180 € Demo Ferries),
+        520 BAF (cost, Demo Ferries: FTL 300 €, LTL 0,60 €/100 kg min 15 €),
+        540 MARPOL (revenue: FTL 45 €, LTL 0,40 €/100 kg min 5 €).
+        Polttoaine (200) siirtyy fuel_rates-taulusta vasta issuessa #4.
+  migrate_surcharges.py + app.migrate_db() (idempotentti, demodata vain tyhjään tauluun).
+
 fuel_rates: ✅ VALMIS
   id, valid_from, valid_to, multiplier
   Demo: 5 kk tammi-touko 2026
@@ -205,6 +220,10 @@ Reference:  GET /api/trailer-types, /api/trailer-specs, /api/incoterms
             GET /api/transport-types, /api/statuses, /api/ferry-routes
             GET /api/services (?all=1 = myös passiiviset)
             GET /api/cost-codes (sama data vanhassa muodossa), /api/pallet-types, /api/next-order-reference
+Surcharges: GET /api/surcharge-rates (?service=&cost_type=&country=&date=)
+            POST /api/surcharge-rates (400 validointi, 409 päällekkäinen voimassaolo)
+            PUT /api/surcharge-rates/:id
+            DELETE /api/surcharge-rates/:id
 Trailers:   GET /api/trailers
             POST /api/trailers
             PUT /api/trailers/:id

@@ -5,6 +5,10 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 from services import run_services_migration
+from surcharges import (
+    run_surcharges_migration, validate_surcharge_payload, find_overlap,
+    SURCHARGE_COLUMNS,
+)
 
 app = Flask(__name__)
 CORS(app)
@@ -117,6 +121,8 @@ def migrate_db():
             conn.execute(f"ALTER TABLE trips ADD COLUMN {col} TEXT")
     # Palvelukoodisto + koodien yhtenäistäminen (401→400, 831→830)
     run_services_migration(conn)
+    # Lisähinnat (surcharge_rates) + demodata tyhjään tauluun
+    run_surcharges_migration(conn)
     conn.commit()
     conn.close()
 
@@ -2105,6 +2111,95 @@ def delete_ferry_rate(rid):
     conn.execute("DELETE FROM ferry_rates WHERE id=?", (rid,))
     conn.commit()
     conn.close()
+    return jsonify({"ok": True})
+
+
+# ===== SURCHARGE RATES (lisähinnat, spec luku 7) =====
+
+@app.route("/api/surcharge-rates", methods=["GET"])
+def get_surcharge_rates():
+    sql = "SELECT * FROM surcharge_rates WHERE 1=1"
+    params = []
+    service = request.args.get("service")
+    if service:
+        sql += " AND service_code = ?"
+        params.append(service)
+    cost_type = request.args.get("cost_type")
+    if cost_type:
+        sql += " AND cost_type = ?"
+        params.append(cost_type)
+    country = request.args.get("country")
+    if country:
+        # Maakohtaiset + kaikkia maita koskevat rivit
+        sql += " AND (country = ? OR country IS NULL)"
+        params.append(country.strip().upper())
+    day = request.args.get("date")
+    if day:
+        sql += " AND valid_from <= ? AND (valid_to IS NULL OR valid_to >= ?)"
+        params += [day, day]
+    sql += " ORDER BY service_code, cost_type, country, valid_from"
+    conn = get_db_connection()
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+def _save_surcharge_rate(rid=None):
+    conn = get_db_connection()
+    try:
+        if rid is not None and not conn.execute(
+            "SELECT 1 FROM surcharge_rates WHERE id = ?", (rid,)
+        ).fetchone():
+            return jsonify({"error": "Lisähintaa ei löydy"}), 404
+        clean, errors = validate_surcharge_payload(request.get_json(silent=True), conn)
+        if errors:
+            return jsonify({"error": "; ".join(errors), "errors": errors}), 400
+        overlap = find_overlap(conn, clean, exclude_id=rid)
+        if overlap:
+            return jsonify({
+                "error": "Samalla kohdistuksella on jo päällekkäinen voimassaolo",
+                "conflict_id": overlap["id"],
+            }), 409
+        values = [clean[c] for c in SURCHARGE_COLUMNS]
+        if rid is None:
+            cur = conn.execute(
+                f"INSERT INTO surcharge_rates ({', '.join(SURCHARGE_COLUMNS)}) "
+                f"VALUES ({', '.join('?' * len(SURCHARGE_COLUMNS))})",
+                values,
+            )
+            rid, status = cur.lastrowid, 201
+        else:
+            conn.execute(
+                f"UPDATE surcharge_rates SET "
+                f"{', '.join(c + ' = ?' for c in SURCHARGE_COLUMNS)} WHERE id = ?",
+                values + [rid],
+            )
+            status = 200
+        conn.commit()
+        row = conn.execute("SELECT * FROM surcharge_rates WHERE id = ?", (rid,)).fetchone()
+        return jsonify(dict(row)), status
+    finally:
+        conn.close()
+
+
+@app.route("/api/surcharge-rates", methods=["POST"])
+def create_surcharge_rate():
+    return _save_surcharge_rate()
+
+
+@app.route("/api/surcharge-rates/<int:rid>", methods=["PUT"])
+def update_surcharge_rate(rid):
+    return _save_surcharge_rate(rid)
+
+
+@app.route("/api/surcharge-rates/<int:rid>", methods=["DELETE"])
+def delete_surcharge_rate(rid):
+    conn = get_db_connection()
+    cur = conn.execute("DELETE FROM surcharge_rates WHERE id = ?", (rid,))
+    conn.commit()
+    conn.close()
+    if cur.rowcount == 0:
+        return jsonify({"error": "Lisähintaa ei löydy"}), 404
     return jsonify({"ok": True})
 
 
