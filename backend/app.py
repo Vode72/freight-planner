@@ -11,6 +11,12 @@ from surcharges import (
     FUEL_SERVICE_CODE, FUEL_COST_TYPE, FUEL_RATE_TYPE, FUEL_ROW_FILTER,
     multiplier_to_rate, rate_to_multiplier, fuel_row_as_legacy,
 )
+from customer_pricing import (
+    run_customer_pricing_migration, delete_customer_pricing,
+    validate_rate_card_payload, validate_billing_rule_payload,
+    find_rate_card_overlap, find_billing_rule_overlap,
+    billing_rule_as_dict, RATE_CARD_COLUMNS, BILLING_RULE_COLUMNS,
+)
 
 app = Flask(__name__)
 CORS(app)
@@ -125,6 +131,8 @@ def migrate_db():
     run_services_migration(conn)
     # Lisähinnat (surcharge_rates) + demodata tyhjään tauluun
     run_surcharges_migration(conn)
+    # Asiakashinnasto + lisäsäännöt + demodata tyhjiin tauluihin
+    run_customer_pricing_migration(conn)
     conn.commit()
     conn.close()
 
@@ -1448,6 +1456,7 @@ def delete_customer(customer_id):
         conn.close()
         return jsonify({"error": "Asiakasta ei löytynyt"}), 404
 
+    delete_customer_pricing(conn, customer_id)
     conn.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
     conn.commit()
     conn.close()
@@ -2271,6 +2280,161 @@ def delete_surcharge_rate(rid):
     if cur.rowcount == 0:
         return jsonify({"error": "Lisähintaa ei löydy"}), 404
     return jsonify({"ok": True})
+
+
+# ===== CUSTOMER PRICING (asiakashinnasto ja lisäsäännöt, spec luku 8) =====
+#
+# Molemmat resurssit toimivat samoin: lista ja luonti asiakkaan alla,
+# muokkaus ja poisto rivin id:llä. Samalla kohdistuksella päällekkäinen
+# voimassaolo → 409.
+
+_CUSTOMER_PRICING = {
+    "rate_cards": {
+        "table": "customer_rate_cards",
+        "columns": RATE_CARD_COLUMNS,
+        "validate": lambda data, conn: validate_rate_card_payload(data),
+        "overlap": find_rate_card_overlap,
+        "order": "origin_country, dest_country, product_type, "
+                 "origin_zip_prefix, dest_zip_prefix, valid_from",
+        "as_dict": dict,
+        "not_found": "Hinnastoriviä ei löydy",
+    },
+    "billing_rules": {
+        "table": "customer_billing_rules",
+        "columns": BILLING_RULE_COLUMNS,
+        "validate": validate_billing_rule_payload,
+        "overlap": find_billing_rule_overlap,
+        "order": "service_code, valid_from",
+        "as_dict": billing_rule_as_dict,
+        "not_found": "Lisäsääntöä ei löydy",
+    },
+}
+
+
+def _customer_exists(conn, customer_id):
+    return conn.execute(
+        "SELECT 1 FROM customers WHERE id = ?", (customer_id,)
+    ).fetchone() is not None
+
+
+def _list_customer_pricing(kind, customer_id):
+    cfg = _CUSTOMER_PRICING[kind]
+    conn = get_db_connection()
+    try:
+        if not _customer_exists(conn, customer_id):
+            return jsonify({"error": "Asiakasta ei löytynyt"}), 404
+        sql = f"SELECT * FROM {cfg['table']} WHERE customer_id = ?"
+        params = [customer_id]
+        day = request.args.get("date")
+        if day:
+            sql += " AND valid_from <= ? AND (valid_to IS NULL OR valid_to >= ?)"
+            params += [day, day]
+        sql += f" ORDER BY {cfg['order']}"
+        rows = conn.execute(sql, params).fetchall()
+        return jsonify([cfg["as_dict"](r) for r in rows])
+    finally:
+        conn.close()
+
+
+def _save_customer_pricing(kind, customer_id=None, row_id=None):
+    """Luonti (customer_id annettu) tai muokkaus (row_id annettu)."""
+    cfg = _CUSTOMER_PRICING[kind]
+    table = cfg["table"]
+    conn = get_db_connection()
+    try:
+        if row_id is not None:
+            existing = conn.execute(
+                f"SELECT customer_id FROM {table} WHERE id = ?", (row_id,)
+            ).fetchone()
+            if not existing:
+                return jsonify({"error": cfg["not_found"]}), 404
+            customer_id = existing["customer_id"]
+        elif not _customer_exists(conn, customer_id):
+            return jsonify({"error": "Asiakasta ei löytynyt"}), 404
+
+        clean, errors = cfg["validate"](request.get_json(silent=True), conn)
+        if errors:
+            return jsonify({"error": "; ".join(errors), "errors": errors}), 400
+        overlap = cfg["overlap"](conn, customer_id, clean, exclude_id=row_id)
+        if overlap:
+            return jsonify({
+                "error": "Samalla kohdistuksella on jo päällekkäinen voimassaolo",
+                "conflict_id": overlap["id"],
+            }), 409
+
+        clean["customer_id"] = customer_id
+        columns = cfg["columns"]
+        values = [clean[c] for c in columns]
+        if row_id is None:
+            cur = conn.execute(
+                f"INSERT INTO {table} ({', '.join(columns)}) "
+                f"VALUES ({', '.join('?' * len(columns))})",
+                values,
+            )
+            row_id, status = cur.lastrowid, 201
+        else:
+            conn.execute(
+                f"UPDATE {table} SET {', '.join(c + ' = ?' for c in columns)} "
+                "WHERE id = ?",
+                values + [row_id],
+            )
+            status = 200
+        conn.commit()
+        row = conn.execute(f"SELECT * FROM {table} WHERE id = ?", (row_id,)).fetchone()
+        return jsonify(cfg["as_dict"](row)), status
+    finally:
+        conn.close()
+
+
+def _delete_customer_pricing_row(kind, row_id):
+    cfg = _CUSTOMER_PRICING[kind]
+    conn = get_db_connection()
+    cur = conn.execute(f"DELETE FROM {cfg['table']} WHERE id = ?", (row_id,))
+    conn.commit()
+    conn.close()
+    if cur.rowcount == 0:
+        return jsonify({"error": cfg["not_found"]}), 404
+    return jsonify({"ok": True})
+
+
+@app.route("/api/customers/<int:customer_id>/rate-cards", methods=["GET"])
+def get_customer_rate_cards(customer_id):
+    return _list_customer_pricing("rate_cards", customer_id)
+
+
+@app.route("/api/customers/<int:customer_id>/rate-cards", methods=["POST"])
+def create_customer_rate_card(customer_id):
+    return _save_customer_pricing("rate_cards", customer_id=customer_id)
+
+
+@app.route("/api/rate-cards/<int:card_id>", methods=["PUT"])
+def update_rate_card(card_id):
+    return _save_customer_pricing("rate_cards", row_id=card_id)
+
+
+@app.route("/api/rate-cards/<int:card_id>", methods=["DELETE"])
+def delete_rate_card(card_id):
+    return _delete_customer_pricing_row("rate_cards", card_id)
+
+
+@app.route("/api/customers/<int:customer_id>/billing-rules", methods=["GET"])
+def get_customer_billing_rules(customer_id):
+    return _list_customer_pricing("billing_rules", customer_id)
+
+
+@app.route("/api/customers/<int:customer_id>/billing-rules", methods=["POST"])
+def create_customer_billing_rule(customer_id):
+    return _save_customer_pricing("billing_rules", customer_id=customer_id)
+
+
+@app.route("/api/billing-rules/<int:rule_id>", methods=["PUT"])
+def update_billing_rule(rule_id):
+    return _save_customer_pricing("billing_rules", row_id=rule_id)
+
+
+@app.route("/api/billing-rules/<int:rule_id>", methods=["DELETE"])
+def delete_billing_rule(rule_id):
+    return _delete_customer_pricing_row("billing_rules", rule_id)
 
 
 # ===== SETTINGS =====

@@ -85,7 +85,8 @@ surcharge_rates: ✅ VALMIS (issue #3, hinnoittelun vaihe 2)
   Logiikka: backend/surcharges.py — calculate_surcharge(service_code, context, conn),
   select_rate(), derive_trade_type(). Tyhjä kohdistuskenttä = kaikki; tarkin voittaa
   (maa 8 > tuote 4 > operaattori 2 > suunta 1). Ei hintaa → None.
-  Asiakkaan sopimuslisä (hakujärjestyksen kohta 1) tulee vaiheessa 4.
+  Asiakkaan sopimuslisä (hakujärjestyksen kohta 1): customer_billing_rules (#5);
+  yhdistäminen calculate_surchargeen hinnanmuodostuksessa (#6).
   Demo: 230 liikkuvuuspaketti (revenue, EXP+IMP: BE 9, NL 9, DE 8, FR 10, PL 7 %),
         530 ETS (revenue 120 € 2025 / 150 € 2026-, cost 180 € Demo Ferries),
         520 BAF (cost, Demo Ferries: FTL 300 €, LTL 0,60 €/100 kg min 15 €),
@@ -100,6 +101,29 @@ Polttoainelisän siirto: ✅ VALMIS (issue #4, hinnoittelun vaihe 3, spec 7.5)
   Ajetaan run_surcharges_migration()-funktiosta; merkitään schema_migrations-
   tauluun (name = fuel_rates_to_surcharge_rates), joten ajetaan vain kerran.
   Siirron jälkeen surcharge_rates on ainoa tietolähde.
+
+customer_rate_cards + customer_billing_rules: ✅ VALMIS (issue #5, vaihe 4, spec luku 8)
+  customer_rate_cards: id, customer_id, origin_country, origin_zip_prefix,
+    dest_country, dest_zip_prefix, product_type (FTL/LTL, pakollinen),
+    freight_price, valid_from, valid_to
+  customer_billing_rules: id, customer_id, service_code, billed (0/1),
+    rate_type (percent/fixed/per_100kg/per_km/pass_through tai tyhjä = listahinta),
+    rate (pass_through: kate-%, tyhjä = 0), valid_from, valid_to
+  Logiikka: backend/customer_pricing.py
+    find_rate_card(conn, customer_id, origin, dest, product_type, date):
+      zip-alue = postinumeron alku; osuma molemmissa päissä > yhdessä > pelkkä maa,
+      pidempi alue voittaa, sitten uusin valid_from. Maakoodi postinumeron alussa
+      ohitetaan (LV-1050 = 1050). Ei osumaa → None, puuttuva tieto → ValueError.
+    get_billing_rule(conn, customer_id, service_code, date) → dict (billed bool) / None
+  Päällekkäinen voimassaolo samalla kohdistuksella → 409. Asiakkaan poisto poistaa
+  myös hinnaston ja säännöt.
+  Demo (lisätään vain, kun molemmat taulut tyhjiä; asiakas luodaan vain jos nimeä ei ole):
+    Nordic Demo Plastics Oy (spec 17): FI→BE FTL 2000, FI→DE FTL 1850, FI→BE LTL 650;
+      200 sopimus 25 %, muut lisät listahinnalla.
+    Baltic Demo Trading Oy (spec 8.2): FI→EE FTL 900 / FI 33xxx→EE 980,
+      FI→LV 10xx FTL 1250, FI→LT FTL 1400 (2025) / 1450 (2026-);
+      200 sopimus 22 %, 230 billed=false, 510 pass_through +5 %.
+  migrate_customer_pricing.py + app.migrate_db() (idempotentti).
 
 fuel_rates: ⚠️ VANHENTUNUT — vain siirron lähde, koodi ei lue tai kirjoita sitä
   id, valid_from, valid_to, multiplier (init_db siemen: 5 kk tammi-touko 2026)
@@ -251,6 +275,11 @@ Surcharges: GET /api/surcharge-rates (?service=&cost_type=&country=&date=)
             POST /api/surcharge-rates (400 validointi, 409 päällekkäinen voimassaolo)
             PUT /api/surcharge-rates/:id
             DELETE /api/surcharge-rates/:id
+Customer pricing: GET/POST /api/customers/:id/rate-cards (?date=)
+            PUT/DELETE /api/rate-cards/:id
+            GET/POST /api/customers/:id/billing-rules (?date=)
+            PUT/DELETE /api/billing-rules/:id
+            (404 asiakas/rivi, 400 validointi, 409 päällekkäinen voimassaolo)
 Trailers:   GET /api/trailers
             POST /api/trailers
             PUT /api/trailers/:id

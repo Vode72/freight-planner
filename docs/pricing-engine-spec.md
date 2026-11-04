@@ -23,6 +23,7 @@
 | 11 | Uusi luku Käyttöoikeudet | 16 |
 | 12 | Rajaukseen: arvio vs. toteuma, jaksotukset, kalustoluokka | 2 |
 | 13 | Kertaluonteiset migraatiot `schema_migrations`-tauluun (toteutettu #4) | 4, 13 |
+| 14 | Asiakashinnasto ja lisäsäännöt (toteutettu #5); luvun 8.2 esimerkki koskee Baltic Demo Tradingia | 8, 13, 14 |
 
 Luvusta 16 alkaen numerointi siirtyi yhdellä (Esimerkkilaskelma on nyt luku 17).
 
@@ -236,7 +237,7 @@ Asiakkaan sovitut rahtihinnat reiteittäin:
 - rahtihinta (€)
 - voimassaolo
 
-Haku: tarkin postinumeroalueosuma ensin, sitten pelkkä maa.
+Haku: tarkin postinumeroalueosuma ensin, sitten pelkkä maa (toteutettu #5). Postinumeroalue on postinumeron alku (esim. `33` = Tampereen seutu); osuma molemmissa päissä voittaa osuman yhdessä päässä, ja pidempi alue lyhyemmän. Postinumeron alussa oleva maakoodi ohitetaan (`LV-1050` = `1050`).
 
 ### 8.2 Lisäsäännöt (`customer_billing_rules`)
 Asiakaskohtaisesti jokaiselle lisälle:
@@ -244,7 +245,9 @@ Asiakaskohtaisesti jokaiselle lisälle:
 - valinnainen oma hinta (`rate_type` + `rate`: percent, fixed, per_100kg, per_km tai pass_through), muuten listahinta
 - voimassaolo
 
-Esimerkki: asiakas A maksaa rahdin, polttoainelisän 25 % (sopimus) ja ETS-lisän listahinnalla. Liikkuvuuspakettia ei laskuteta erikseen.
+Esimerkki: *Baltic Demo Trading Oy* maksaa rahdin, polttoainelisän 22 % (sopimus) ja ETS-lisän listahinnalla. Liikkuvuuspakettia ei laskuteta erikseen (`billed = false`), ja satamamaksu läpilaskutetaan 5 % katteella. (Luvun 17 *Nordic Demo Plastics Oy* maksaa sen sijaan liikkuvuuspaketin listahinnalla.)
+
+Jos asiakkaalla ei ole sääntöä lisälle, käytetään listahintaa. Sääntö ilman omaa hintaa (`rate_type` tyhjä) tarkoittaa listahintaa, ja `billed = false` ei salli omaa hintaa.
 
 **Läpilaskutus (`pass_through`):** myyntirivi = tripin toteutuneet kulurivit samalla palvelukoodilla, kerrottuna `(1 + rate / 100)`. `rate` on valinnainen kate-%; tyhjä = 0 % eli kulu sellaisenaan.
 
@@ -590,7 +593,7 @@ Jokainen vaihe on oma haaransa ja omat testinsä. Vaiheet 1–6 ja 9–11 ovat p
 | 1 | #2 ✅ | services-taulu + koodiston yhtenäistäminen | Koodisto haetaan kannasta, 401/831 yhdistetty, vanhat rivit migroitu, testit vihreänä |
 | 2 | #3 ✅ | surcharge_rates + laskentafunktio | Kaikki 4 rate_typeä, pakollinen cost_type, min/max, hakujärjestys ja voimassaolo testattu |
 | 3 | #4 ✅ | Polttoainelisän siirto | fuel_rates → surcharge_rates, 120 → 200 -automaatti toimii kuten ennen, siirto kirjattu schema_migrations-tauluun |
-| 4 | #5 | Asiakashinnasto + lisäsäännöt (API) | CRUD-endpointit, haku postinumeroalueella ja maalla testattu |
+| 4 | #5 ✅ | Asiakashinnasto + lisäsäännöt (API) | CRUD-endpointit, haku postinumeroalueella ja maalla testattu |
 | 5 | #6 | Tilauksen hinnanmuodostus (API) | price-preview ja price-apply, contract ja spot, trade_type-päättely, maksaja toimitusehdosta, pass_through, created_by testattu |
 | 6 | #7 | Tripin automaattikulut (API) | Trip-km-kentät, kotimaan ja mantereen vetäjän km-hinnat, rivit 210–212 ja 220–222, tyhjä ajo lastattavalle keikalle, lautta-, BAF- ja ETS-rivit, trailervuokran uudelleenlaskenta FEC-päivillä, vastakirjaus; käsin muokattuja ei ylikirjoiteta |
 | 7 | #8 | Käyttöliittymät | Hinnoittelu → Lisät, asiakaskortin välilehdet, OrderFormin hintaehdotus, TripDetailin ja OrderDetailin välilehdet (luku 15) |
