@@ -1,5 +1,5 @@
 FREIGHT PLANNER — PROJEKTIN KONTEKSTI VS CODE CLAUDELLE
-Päivitetty: 04.06.2026 (v10)
+Päivitetty: 04.11.2026 (v11)
 ============================================================
 
 ROOLI:
@@ -71,13 +71,21 @@ surcharge_rates: ✅ VALMIS (issue #3, hinnoittelun vaihe 2)
         530 ETS (revenue 120 € 2025 / 150 € 2026-, cost 180 € Demo Ferries),
         520 BAF (cost, Demo Ferries: FTL 300 €, LTL 0,60 €/100 kg min 15 €),
         540 MARPOL (revenue: FTL 45 €, LTL 0,40 €/100 kg min 5 €).
-        Polttoaine (200) siirtyy fuel_rates-taulusta vasta issuessa #4.
+        200 polttoainelisä (revenue, percent, kohdistus tyhjä) — siirretty
+        fuel_rates-taulusta (issue #4): 15, 16, 18, 17, 19 % tammi-touko 2026.
   migrate_surcharges.py + app.migrate_db() (idempotentti, demodata vain tyhjään tauluun).
 
-fuel_rates: ✅ VALMIS
-  id, valid_from, valid_to, multiplier
-  Demo: 5 kk tammi-touko 2026
-  Hallitaan Hallinta-osiossa (⛽ Polttoainekerroin)
+Polttoainelisän siirto: ✅ VALMIS (issue #4, hinnoittelun vaihe 3, spec 7.5)
+  surcharges.migrate_fuel_rates(): kertaluonteinen fuel_rates → surcharge_rates
+  (200 / revenue / percent, rate = round((m − 1) × 100, 4), kerroin ≤ 1 ohitetaan).
+  Ajetaan run_surcharges_migration()-funktiosta; merkitään schema_migrations-
+  tauluun (name = fuel_rates_to_surcharge_rates), joten ajetaan vain kerran.
+  Siirron jälkeen surcharge_rates on ainoa tietolähde.
+
+fuel_rates: ⚠️ VANHENTUNUT — vain siirron lähde, koodi ei lue tai kirjoita sitä
+  id, valid_from, valid_to, multiplier (init_db siemen: 5 kk tammi-touko 2026)
+  Taulu poistetaan UI-vaiheessa (FuelRateManager → Hinnoittelu → Lisät).
+  Hallitaan edelleen Hallinta-osiossa (⛽ Polttoainekerroin) /api/fuel-rates-kautta.
 
 trailers: (12 kpl TIP Trailer Services)
   plate_number, identifier, trailer_type, leasing_rate, rental_rate, status
@@ -245,10 +253,10 @@ Orders:     GET/POST /api/orders, GET/PUT/DELETE /api/orders/:id
 Costs:      GET/POST /api/trips/:id/costs, PUT/DELETE /api/costs/:id
 Route:      GET /api/route-match
 Customers:  GET/POST /api/customers, GET/PUT/DELETE /api/customers/:id
-Fuel:       GET/POST /api/fuel-rates
-            GET /api/fuel-rates/current?date=YYYY-MM-DD
-            PUT /api/fuel-rates/:id
-            DELETE /api/fuel-rates/:id
+Fuel:       GET/POST /api/fuel-rates          (yhteensopivuuskerros: lukee/kirjoittaa
+            GET /api/fuel-rates/current?date=  surcharge_rates-taulun 200-rivejä,
+            PUT /api/fuel-rates/:id            multiplier = 1 + rate / 100;
+            DELETE /api/fuel-rates/:id         kerroin < 1 → 400, päällekkäisyys → 409)
 Dashboard:  GET /api/costs-dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD
 Maintenance: GET/POST /api/trailers/:id/maintenance
             PUT/DELETE /api/maintenance/:id
@@ -341,7 +349,9 @@ Oletus revenue: 100, 120, 200, 230, 720 — muut cost.
 POLTTOAINELISÄ-LOGIIKKA:
 - FREIGHT (120) → lisätään automaattisesti POLTTOAINELISÄ (200)
 - SPOT (100) → kaikki kulut sisältyy spot-hintaan, ei erillistä polttoainelisää
-- Kerroin kuukausittainen (fuel_rates-taulu)
+- Kerroin kuukausittainen; tallennettu surcharge_rates-tauluun prosenttina (200)
+- Summa: calculate_surcharge("200", {cost_type: revenue, date: loading_date,
+  freight_amount}) — ROUND_HALF_UP, kuvaus "POLTTOAINELISÄ (kerroin 1.18)"
 - Näkyy erillisenä rivinä laskulla
 
 KAPASITEETTITYYPIT:

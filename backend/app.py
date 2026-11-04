@@ -7,7 +7,9 @@ from flask_cors import CORS
 from services import run_services_migration
 from surcharges import (
     run_surcharges_migration, validate_surcharge_payload, find_overlap,
-    SURCHARGE_COLUMNS,
+    SURCHARGE_COLUMNS, calculate_surcharge, select_rate,
+    FUEL_SERVICE_CODE, FUEL_COST_TYPE, FUEL_RATE_TYPE, FUEL_ROW_FILTER,
+    multiplier_to_rate, rate_to_multiplier, fuel_row_as_legacy,
 )
 
 app = Flask(__name__)
@@ -1200,21 +1202,25 @@ def add_cost(trip_id):
 
     fuel_cost_id = None
     if data.get("cost_code") == "120":
+        # Polttoainelisä samalla hinnoittelulogiikalla kuin muut lisät (luku 7.5)
         ref_date = trip["loading_date"] or datetime.now().strftime("%Y-%m-%d")
-        rate = conn.execute("""
-            SELECT multiplier FROM fuel_rates
-            WHERE valid_from <= ? AND valid_to >= ?
-            ORDER BY valid_from DESC LIMIT 1
-        """, (ref_date, ref_date)).fetchone()
+        try:
+            fuel = calculate_surcharge(FUEL_SERVICE_CODE, {
+                "cost_type": FUEL_COST_TYPE,
+                "date": ref_date,
+                "freight_amount": float(data.get("amount", 0)),
+            }, conn)
+        except ValueError:
+            fuel = None
 
-        if rate and rate["multiplier"]:
-            fuel_amount = round(float(data.get("amount", 0)) * (rate["multiplier"] - 1.0), 2)
-            if fuel_amount > 0:
-                cursor.execute("""
-                    INSERT INTO costs (trip_id, cost_code, description, amount, cost_type)
-                    VALUES (?, '200', ?, ?, 'revenue')
-                """, (trip_id, f"POLTTOAINELISÄ (kerroin {rate['multiplier']})", fuel_amount))
-                fuel_cost_id = cursor.lastrowid
+        if fuel and fuel["amount"] > 0:
+            multiplier = rate_to_multiplier(fuel["rate"])
+            cursor.execute("""
+                INSERT INTO costs (trip_id, cost_code, description, amount, cost_type)
+                VALUES (?, ?, ?, ?, ?)
+            """, (trip_id, FUEL_SERVICE_CODE, f"POLTTOAINELISÄ (kerroin {multiplier})",
+                  fuel["amount"], FUEL_COST_TYPE))
+            fuel_cost_id = cursor.lastrowid
 
     conn.commit()
     response = {"message": "Kulu lisätty", "id": cost_id}
@@ -1448,72 +1454,136 @@ def delete_customer(customer_id):
     return jsonify({"message": "Asiakas poistettu"})
 
 
-# ===== FUEL RATES =====
+# ===== FUEL RATES (yhteensopivuuskerros, spec luku 7.5) =====
+#
+# Polttoainelisä on surcharge_rates-taulussa (200 / revenue / percent).
+# Nämä endpointit säilyttävät vanhan kerroinmuotoisen rajapinnan
+# FuelRateManageria varten: multiplier = 1 + rate / 100.
+# fuel_rates-taulua ei enää käytetä (poisto UI-vaiheessa).
+
+def _fuel_rows(conn):
+    return conn.execute(
+        f"SELECT * FROM surcharge_rates WHERE {FUEL_ROW_FILTER}"
+    ).fetchall()
+
+
+def _get_fuel_row(conn, rate_id):
+    return conn.execute(
+        f"SELECT * FROM surcharge_rates WHERE id = ? AND {FUEL_ROW_FILTER}",
+        (rate_id,),
+    ).fetchone()
+
+
+def _fuel_payload_to_clean(data, conn):
+    """Vanha {valid_from, valid_to, multiplier} → validoitu surcharge-rivi."""
+    if not data or not data.get("valid_from") or not data.get("valid_to") or not data.get("multiplier"):
+        return None, ["valid_from, valid_to ja multiplier ovat pakollisia"]
+    try:
+        multiplier = float(data["multiplier"])
+    except (TypeError, ValueError):
+        return None, ["multiplier ei ole numero"]
+    if multiplier < 1.0:
+        return None, ["Kertoimen on oltava vähintään 1"]
+    return validate_surcharge_payload({
+        "service_code": FUEL_SERVICE_CODE,
+        "cost_type": FUEL_COST_TYPE,
+        "rate_type": FUEL_RATE_TYPE,
+        "rate": multiplier_to_rate(multiplier),
+        "valid_from": data["valid_from"],
+        "valid_to": data["valid_to"],
+    }, conn)
+
+
+def _save_fuel_rate(conn, rate_id=None):
+    """Tallentaa kertoimen. Palauttaa (id, None) tai (None, (vastaus, status))."""
+    clean, errors = _fuel_payload_to_clean(request.get_json(silent=True), conn)
+    if errors:
+        return None, (jsonify({"error": "; ".join(errors)}), 400)
+    overlap = find_overlap(conn, clean, exclude_id=rate_id)
+    if overlap:
+        return None, (jsonify({
+            "error": "Kertoimella on jo päällekkäinen voimassaolo",
+            "conflict_id": overlap["id"],
+        }), 409)
+    values = [clean[c] for c in SURCHARGE_COLUMNS]
+    if rate_id is None:
+        cur = conn.execute(
+            f"INSERT INTO surcharge_rates ({', '.join(SURCHARGE_COLUMNS)}) "
+            f"VALUES ({', '.join('?' * len(SURCHARGE_COLUMNS))})",
+            values,
+        )
+        rate_id = cur.lastrowid
+    else:
+        conn.execute(
+            f"UPDATE surcharge_rates SET "
+            f"{', '.join(c + ' = ?' for c in SURCHARGE_COLUMNS)} WHERE id = ?",
+            values + [rate_id],
+        )
+    conn.commit()
+    return rate_id, None
+
 
 @app.route("/api/fuel-rates", methods=["GET"])
 def get_fuel_rates():
     conn = get_db_connection()
-    rates = conn.execute("SELECT * FROM fuel_rates ORDER BY valid_from DESC").fetchall()
+    rates = [fuel_row_as_legacy(r) for r in _fuel_rows(conn)]
     conn.close()
-    return jsonify([dict(r) for r in rates])
+    rates.sort(key=lambda r: (r["valid_from"], r["id"]), reverse=True)
+    return jsonify(rates)
 
 
 @app.route("/api/fuel-rates/current", methods=["GET"])
 def get_current_fuel_rate():
     date_str = request.args.get("date", datetime.now().strftime("%Y-%m-%d"))
     conn = get_db_connection()
-    rate = conn.execute("""
-        SELECT * FROM fuel_rates
-        WHERE valid_from <= ? AND valid_to >= ?
-        ORDER BY valid_from DESC LIMIT 1
-    """, (date_str, date_str)).fetchone()
+    rows = [dict(r) for r in _fuel_rows(conn)]
     conn.close()
+    try:
+        rate = select_rate(rows, {"cost_type": FUEL_COST_TYPE, "date": date_str})
+    except ValueError:
+        rate = None
     if rate:
-        return jsonify(dict(rate))
+        return jsonify(fuel_row_as_legacy(rate))
     return jsonify({"multiplier": None, "message": "Ei voimassaolevaa kerrointa"}), 404
 
 
 @app.route("/api/fuel-rates", methods=["POST"])
 def create_fuel_rate():
-    data = request.get_json()
-    if not data or not data.get("valid_from") or not data.get("valid_to") or not data.get("multiplier"):
-        return jsonify({"error": "valid_from, valid_to ja multiplier ovat pakollisia"}), 400
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO fuel_rates (valid_from, valid_to, multiplier) VALUES (?, ?, ?)
-    """, (data["valid_from"], data["valid_to"], float(data["multiplier"])))
-    conn.commit()
-    new_id = cursor.lastrowid
-    conn.close()
-    return jsonify({"message": "Kerroin lisätty", "id": new_id}), 201
+    try:
+        new_id, error = _save_fuel_rate(conn)
+        if error:
+            return error
+        return jsonify({"message": "Kerroin lisätty", "id": new_id}), 201
+    finally:
+        conn.close()
 
 
 @app.route("/api/fuel-rates/<int:rate_id>", methods=["PUT"])
 def update_fuel_rate(rate_id):
     conn = get_db_connection()
-    if not conn.execute("SELECT id FROM fuel_rates WHERE id=?", (rate_id,)).fetchone():
+    try:
+        if not _get_fuel_row(conn, rate_id):
+            return jsonify({"error": "Kerrointa ei löydy"}), 404
+        _, error = _save_fuel_rate(conn, rate_id)
+        if error:
+            return error
+        return jsonify({"message": "Kerroin päivitetty"})
+    finally:
         conn.close()
-        return jsonify({"error": "Kerrointa ei löydy"}), 404
-    data = request.get_json()
-    conn.execute("""
-        UPDATE fuel_rates SET valid_from=?, valid_to=?, multiplier=? WHERE id=?
-    """, (data["valid_from"], data["valid_to"], float(data["multiplier"]), rate_id))
-    conn.commit()
-    conn.close()
-    return jsonify({"message": "Kerroin päivitetty"})
 
 
 @app.route("/api/fuel-rates/<int:rate_id>", methods=["DELETE"])
 def delete_fuel_rate(rate_id):
     conn = get_db_connection()
-    if not conn.execute("SELECT id FROM fuel_rates WHERE id=?", (rate_id,)).fetchone():
+    try:
+        if not _get_fuel_row(conn, rate_id):
+            return jsonify({"error": "Kerrointa ei löydy"}), 404
+        conn.execute("DELETE FROM surcharge_rates WHERE id = ?", (rate_id,))
+        conn.commit()
+        return jsonify({"message": "Kerroin poistettu"})
+    finally:
         conn.close()
-        return jsonify({"error": "Kerrointa ei löydy"}), 404
-    conn.execute("DELETE FROM fuel_rates WHERE id=?", (rate_id,))
-    conn.commit()
-    conn.close()
-    return jsonify({"message": "Kerroin poistettu"})
 
 
 @app.route("/api/costs-dashboard", methods=["GET"])

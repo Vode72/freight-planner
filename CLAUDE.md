@@ -42,7 +42,7 @@ Aja järjestyksessä `backend/`-hakemistossa:
 | `python migrate_hallinta.py` | trailer_maintenance, km_rates, ferry_rates, trailerin huoltosarakkeet |
 | `python migrate_settings.py` | settings (yritystiedot + hälytyskonfiguraatio) |
 | `python migrate_services.py` | services (palvelukoodisto) + vanhojen koodien yhdistäminen 401→400, 831→830 |
-| `python migrate_surcharges.py` | surcharge_rates (lisähinnat) + demodata tyhjään tauluun |
+| `python migrate_surcharges.py` | surcharge_rates (lisähinnat) + demodata tyhjään tauluun + fuel_rates → surcharge_rates (200) |
 
 `app.py` ajaa käynnistyessään `migrate_db()` joka lisää FEC-timestampit automaattisesti
 jos niitä ei vielä ole, sekä palvelukoodiston (`services.py`) ja lisähintojen (`surcharges.py`) migraation
@@ -88,6 +88,7 @@ freight-planner/
 │       ├── test_id_gen.py        # ID-generoinnin testit
 │       ├── test_services.py      # Palvelukoodiston ja migraation testit
 │       ├── test_surcharges.py    # Lisähintojen laskenta, hakujärjestys, voimassaolo, CRUD
+│       ├── test_fuel_migration.py # Polttoainelisän siirto, summien vastaavuus, /api/fuel-rates
 │       └── test_costs.py        # Kustannuslogiikan testit
 └── frontend/
     └── src/
@@ -123,7 +124,7 @@ freight-planner/
 
 | Tapahtuma | Automaatti |
 |---|---|
-| Koodi 120 (FREIGHT) lisätään | Koodi 200 (POLTTOAINELISÄ) lisätään automaattisesti `fuel_rates`-kertoimella |
+| Koodi 120 (FREIGHT) lisätään | Koodi 200 (POLTTOAINELISÄ) lisätään automaattisesti `calculate_surcharge("200", …)` -funktiolla (surcharge_rates, percent) |
 | Trip vahvistetaan (→ Vahvistettu) | Kaksi koodin 400 riviä (TRAILERVUOKRA, cost + revenue) lisätään päivien mukaan |
 | FEC loading_started >30 min myöhässä | Koodi 800 (ODOTUSAIKA) lisätään automaattisesti |
 | FEC delivery_completed kuitataan | `delivered_at`-timestamp asetetaan (OTD-laskenta) |
@@ -140,6 +141,12 @@ summan (`percent` rahdista, `fixed`, `per_100kg`, `per_km`) + min/max, pyöristy
 `cost_type` on pakollinen sekä rivillä että contextissa (myynti ≠ osto, esim. ETS 150 € / 180 €).
 Ei hintaa → `None`; puuttuva lähtötieto → `ValueError`. Sama kohdistus + päällekkäinen
 voimassaolo → API palauttaa 409. `derive_trade_type(lastausmaa, purkumaa)` → DOM/EXP/IMP/CROSS.
+
+**Polttoainelisä** (spec 7.5) on `surcharge_rates`-taulussa: 200 / revenue / percent, kohdistus tyhjä.
+`migrate_fuel_rates()` siirsi `fuel_rates`-rivit kertaluonteisesti (`rate = round((m − 1) × 100, 4)`,
+kerroin ≤ 1 ohitetaan, merkintä `schema_migrations`-tauluun). `fuel_rates`-taulua ei enää käytetä
+koodissa (poisto UI-vaiheessa). `/api/fuel-rates` on yhteensopivuuskerros FuelRateManagerille:
+sama vastausmuoto, `multiplier = 1 + rate / 100`.
 
 **Oletus-cost_type (`default_cost_type`):**
 - `revenue`: 100, 120, 200, 230, 720

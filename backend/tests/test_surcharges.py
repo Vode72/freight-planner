@@ -315,6 +315,8 @@ def test_demo_seed_is_idempotent(demo):
 
 
 def test_demo_has_no_fuel_surcharge(demo):
+    # Polttoainelisä (200) ei ole demodatassa: se siirretään fuel_rates-
+    # taulusta (migrate_fuel_rates, test_fuel_migration.py).
     assert demo.execute(
         "SELECT COUNT(*) FROM surcharge_rates WHERE service_code = '200'"
     ).fetchone()[0] == 0

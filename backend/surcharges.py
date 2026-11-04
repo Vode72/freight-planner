@@ -115,8 +115,117 @@ def seed_surcharge_rates(conn):
 
 
 def run_surcharges_migration(conn):
+    """Taulu + demodata tyhjään tauluun + polttoainelisän siirto (luku 7.5)."""
     ensure_surcharge_rates(conn)
-    return seed_surcharge_rates(conn)
+    seeded = seed_surcharge_rates(conn)
+    migrate_fuel_rates(conn)
+    return seeded
+
+
+# ── Polttoainelisä (luku 7.5) ─────────────────────────────────────────
+#
+# Polttoainelisä on palvelu 200, myynti, prosentti rahdista, kaikille
+# kohdistuksille yhteinen (kohdistuskentät tyhjiä). Vanha fuel_rates-taulu
+# on vain siirron lähde; siirron jälkeen surcharge_rates on ainoa
+# tietolähde. /api/fuel-rates muuntaa kerroin ↔ prosentti.
+
+FUEL_SERVICE_CODE = "200"
+FUEL_COST_TYPE = "revenue"
+FUEL_RATE_TYPE = "percent"
+FUEL_MIGRATION_NAME = "fuel_rates_to_surcharge_rates"
+
+# WHERE-ehto, joka rajaa surcharge_rates-taulusta polttoainelisän rivit
+FUEL_ROW_FILTER = (
+    "service_code = '200' AND cost_type = 'revenue' AND rate_type = 'percent' "
+    "AND trade_type IS NULL AND product_type IS NULL "
+    "AND country IS NULL AND operator IS NULL"
+)
+
+
+def multiplier_to_rate(multiplier):
+    """Kerroin → prosentti: (m − 1) × 100, neljä desimaalia."""
+    return round((float(multiplier) - 1.0) * 100, 4)
+
+
+def rate_to_multiplier(rate):
+    """Prosentti → kerroin: 1 + rate / 100.
+
+    Kuusi desimaalia, koska prosentissa on neljä (12.345 % ↔ 1.12345).
+    """
+    return round(1.0 + float(rate) / 100, 6)
+
+
+def fuel_row_as_legacy(row):
+    """surcharge_rates-rivi vanhan /api/fuel-rates-vastauksen muotoon."""
+    row = dict(row)
+    return {
+        "id": row["id"],
+        "valid_from": row["valid_from"],
+        "valid_to": row["valid_to"],
+        "multiplier": rate_to_multiplier(row["rate"]),
+        "created_at": None,
+    }
+
+
+def _ensure_migration_log(conn):
+    conn.execute("""
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    name TEXT PRIMARY KEY,
+    applied_at TEXT DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+
+def _table_exists(conn, name):
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+    ).fetchone() is not None
+
+
+def migrate_fuel_rates(conn):
+    """Kertaluonteinen siirto fuel_rates → surcharge_rates (luku 7.5).
+
+    Jokaisesta kertoimesta tulee rivi: 200 / revenue / percent,
+    rate = round((m − 1) × 100, 4). Kerroin ≤ 1 ohitetaan (ei lisää).
+    Siirto merkitään schema_migrations-tauluun, joten uudelleenajo ei tee
+    mitään — muuten /api/fuel-rates-kautta poistetut rivit palaisivat
+    jokaisella käynnistyksellä. Lisäksi samanlaista riviä ei lisätä kahdesti.
+    Palauttaa siirrettyjen rivien määrän.
+    """
+    if not _table_exists(conn, "fuel_rates"):
+        return 0
+    _ensure_migration_log(conn)
+    if conn.execute(
+        "SELECT 1 FROM schema_migrations WHERE name = ?", (FUEL_MIGRATION_NAME,)
+    ).fetchone():
+        return 0
+
+    migrated = 0
+    legacy = conn.execute(
+        "SELECT valid_from, valid_to, multiplier FROM fuel_rates ORDER BY valid_from, id"
+    ).fetchall()
+    for valid_from, valid_to, multiplier in legacy:
+        if multiplier is None or float(multiplier) <= 1.0:
+            continue
+        rate = multiplier_to_rate(multiplier)
+        exists = conn.execute(
+            f"SELECT 1 FROM surcharge_rates WHERE {FUEL_ROW_FILTER} "
+            "AND valid_from = ? AND valid_to IS ? AND rate = ?",
+            (valid_from, valid_to, rate),
+        ).fetchone()
+        if exists:
+            continue
+        conn.execute(
+            "INSERT INTO surcharge_rates (service_code, cost_type, rate_type, "
+            "rate, valid_from, valid_to) VALUES (?, ?, ?, ?, ?, ?)",
+            (FUEL_SERVICE_CODE, FUEL_COST_TYPE, FUEL_RATE_TYPE, rate,
+             valid_from, valid_to),
+        )
+        migrated += 1
+    conn.execute(
+        "INSERT INTO schema_migrations (name) VALUES (?)", (FUEL_MIGRATION_NAME,)
+    )
+    return migrated
 
 
 # ── Apufunktiot ───────────────────────────────────────────────────────
