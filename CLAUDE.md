@@ -98,7 +98,8 @@ freight-planner/
 │       ├── test_customer_pricing.py # Asiakashinnasto (zip/maa-haku, voimassaolo), lisäsäännöt, CRUD
 │       ├── test_costs.py        # Kustannuslogiikan testit
 │       ├── test_demo_data.py    # Demonimet ("Demo"), katteet 8–20 %, spot, 400-rivit
-│       └── test_db_path.py      # FREIGHT_DB_PATH, ei migraatiota importissa, reset_demo
+│       ├── test_db_path.py      # FREIGHT_DB_PATH, ei migraatiota importissa, reset_demo
+│       └── test_dashboard.py    # /api/dashboard-summat = costs-taulu (ei kertaudu orderien määrällä)
 └── frontend/
     └── src/
         ├── App.js                # Sidebar-layout, reititys

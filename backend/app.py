@@ -1312,32 +1312,44 @@ def delete_cost(cost_id):
 def get_dashboard():
     conn = get_db_connection()
 
+    # orders ja costs ovat molemmat 1:N tripiin nähden: ne aggregoidaan
+    # alikyselyissä ennen liitosta, jotta kulurivit eivät kerrotu orderien
+    # määrällä (issue #20).
     trips = conn.execute("""
         SELECT t.id, t.trip_id, t.status, t.loading_date, t.delivery_date,
                t.first_pickup_city, t.first_pickup_country,
                t.trip_end_city, t.trip_end_country,
                c.name as carrier_name,
-               COUNT(DISTINCT o.id) as order_count,
-               COALESCE(SUM(CASE WHEN co.cost_type='revenue' THEN co.amount ELSE 0 END), 0) as total_revenue,
-               COALESCE(SUM(CASE WHEN co.cost_type='cost' THEN co.amount ELSE 0 END), 0) as total_costs
+               COALESCE(oc.order_count, 0) as order_count,
+               COALESCE(cs.total_revenue, 0) as total_revenue,
+               COALESCE(cs.total_costs, 0) as total_costs
         FROM trips t
         LEFT JOIN carriers c ON t.carrier_id = c.id
-        LEFT JOIN orders o ON o.trip_id = t.id
-        LEFT JOIN costs co ON co.trip_id = t.id
-        GROUP BY t.id
+        LEFT JOIN (
+            SELECT trip_id, COUNT(*) as order_count
+            FROM orders GROUP BY trip_id
+        ) oc ON oc.trip_id = t.id
+        LEFT JOIN (
+            SELECT trip_id,
+                   SUM(CASE WHEN cost_type='revenue' THEN amount ELSE 0 END) as total_revenue,
+                   SUM(CASE WHEN cost_type='cost' THEN amount ELSE 0 END) as total_costs
+            FROM costs GROUP BY trip_id
+        ) cs ON cs.trip_id = t.id
         ORDER BY t.created_at DESC
         LIMIT 20
     """).fetchall()
 
     kpi = conn.execute("""
         SELECT
-            COUNT(DISTINCT t.id) as total_trips,
-            COUNT(DISTINCT o.id) as total_orders,
-            COALESCE(SUM(CASE WHEN co.cost_type='revenue' THEN co.amount ELSE 0 END), 0) as total_revenue,
-            COALESCE(SUM(CASE WHEN co.cost_type='cost' THEN co.amount ELSE 0 END), 0) as total_costs
-        FROM trips t
-        LEFT JOIN orders o ON o.trip_id = t.id
-        LEFT JOIN costs co ON co.trip_id = t.id
+            (SELECT COUNT(*) FROM trips) as total_trips,
+            (SELECT COUNT(*) FROM orders
+              WHERE trip_id IN (SELECT id FROM trips)) as total_orders,
+            (SELECT COALESCE(SUM(co.amount), 0) FROM costs co
+               JOIN trips t ON co.trip_id = t.id
+              WHERE co.cost_type = 'revenue') as total_revenue,
+            (SELECT COALESCE(SUM(co.amount), 0) FROM costs co
+               JOIN trips t ON co.trip_id = t.id
+              WHERE co.cost_type = 'cost') as total_costs
     """).fetchone()
 
     status_counts = conn.execute("""
@@ -1361,6 +1373,8 @@ def get_dashboard():
     kpi_dict = dict(kpi)
     total_revenue = kpi_dict["total_revenue"]
     total_costs = kpi_dict["total_costs"]
+    kpi_dict["total_revenue"] = round(total_revenue, 2)
+    kpi_dict["total_costs"] = round(total_costs, 2)
     kpi_dict["margin"] = round(total_revenue - total_costs, 2)
     kpi_dict["margin_percent"] = round(
         (kpi_dict["margin"] / total_revenue * 100), 2
