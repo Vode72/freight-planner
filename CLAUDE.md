@@ -19,6 +19,7 @@ python migrate_hallinta.py
 python migrate_settings.py
 python migrate_services.py
 python migrate_surcharges.py
+python migrate_customer_pricing.py
 python app.py                 # http://127.0.0.1:5000
 
 # Frontend
@@ -43,9 +44,10 @@ Aja järjestyksessä `backend/`-hakemistossa:
 | `python migrate_settings.py` | settings (yritystiedot + hälytyskonfiguraatio) |
 | `python migrate_services.py` | services (palvelukoodisto) + vanhojen koodien yhdistäminen 401→400, 831→830 |
 | `python migrate_surcharges.py` | surcharge_rates (lisähinnat) + demodata tyhjään tauluun + fuel_rates → surcharge_rates (200) |
+| `python migrate_customer_pricing.py` | customer_rate_cards + customer_billing_rules + demodata (Nordic Demo Plastics Oy, Baltic Demo Trading Oy) |
 
 `app.py` ajaa käynnistyessään `migrate_db()` joka lisää FEC-timestampit automaattisesti
-jos niitä ei vielä ole, sekä palvelukoodiston (`services.py`) ja lisähintojen (`surcharges.py`) migraation
+jos niitä ei vielä ole, sekä palvelukoodiston (`services.py`), lisähintojen (`surcharges.py`) ja asiakashinnoittelun (`customer_pricing.py`) migraation
 (idempotent, turvallinen uudelleenajoon).
 
 ---
@@ -75,12 +77,14 @@ freight-planner/
 │   ├── restriction_engine.py     # Ajokieltologiikka (maarajoitukset)
 │   ├── services.py               # Palvelukoodisto (SERVICES) + migraatiofunktiot
 │   ├── surcharges.py             # Lisähinnat: calculate_surcharge, derive_trade_type, demodata
+│   ├── customer_pricing.py       # Asiakashinnasto + lisäsäännöt: find_rate_card, get_billing_rule
 │   ├── init_db.py                # create_schema() + seed_demo_data() + reset_db()
 │   ├── migrate_restrictions.py   # country_restrictions, terminals
 │   ├── migrate_hallinta.py       # trailer_maintenance, km_rates, ferry_rates
 │   ├── migrate_settings.py       # settings-taulu
 │   ├── migrate_services.py       # services-taulu + 401→400, 831→830
 │   ├── migrate_surcharges.py     # surcharge_rates-taulu + demodata
+│   ├── migrate_customer_pricing.py # customer_rate_cards, customer_billing_rules + demodata
 │   ├── requirements.txt
 │   ├── pytest.ini
 │   └── tests/
@@ -89,6 +93,7 @@ freight-planner/
 │       ├── test_services.py      # Palvelukoodiston ja migraation testit
 │       ├── test_surcharges.py    # Lisähintojen laskenta, hakujärjestys, voimassaolo, CRUD
 │       ├── test_fuel_migration.py # Polttoainelisän siirto, summien vastaavuus, /api/fuel-rates
+│       ├── test_customer_pricing.py # Asiakashinnasto (zip/maa-haku, voimassaolo), lisäsäännöt, CRUD
 │       └── test_costs.py        # Kustannuslogiikan testit
 └── frontend/
     └── src/
@@ -141,6 +146,14 @@ summan (`percent` rahdista, `fixed`, `per_100kg`, `per_km`) + min/max, pyöristy
 `cost_type` on pakollinen sekä rivillä että contextissa (myynti ≠ osto, esim. ETS 150 € / 180 €).
 Ei hintaa → `None`; puuttuva lähtötieto → `ValueError`. Sama kohdistus + päällekkäinen
 voimassaolo → API palauttaa 409. `derive_trade_type(lastausmaa, purkumaa)` → DOM/EXP/IMP/CROSS.
+
+**Asiakashinnoittelu** (spec luku 8): `customer_rate_cards` (`/api/customers/:id/rate-cards`, `/api/rate-cards/:id`)
+ja `customer_billing_rules` (`/api/customers/:id/billing-rules`, `/api/billing-rules/:id`), CRUD + 409 päällekkäisyydestä.
+`find_rate_card(conn, customer_id, origin, dest, product_type, date)` — origin/dest `{country, zip}` tai maakoodi;
+postinumeroalueosuma (postinumeron alku) ennen pelkkää maata, pidempi alue voittaa. Ei osumaa → `None`.
+`get_billing_rule(conn, customer_id, service_code, date)` → `{billed, rate_type, rate, …}` tai `None` (= listahinta).
+`rate_type` tyhjä = listahinta, `pass_through` sallittu vain säännöissä (`rate` = kate-%, tyhjä = 0 %).
+Asiakkaan poisto poistaa myös hinnaston ja säännöt.
 
 **Polttoainelisä** (spec 7.5) on `surcharge_rates`-taulussa: 200 / revenue / percent, kohdistus tyhjä.
 `migrate_fuel_rates()` siirsi `fuel_rates`-rivit kertaluonteisesti (`rate = round((m − 1) × 100, 4)`,
