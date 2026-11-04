@@ -1,5 +1,5 @@
 FREIGHT PLANNER — PROJEKTIN KONTEKSTI VS CODE CLAUDELLE
-Päivitetty: 04.11.2026 (v11)
+Päivitetty: 04.11.2026 (v12)
 ============================================================
 
 ROOLI:
@@ -53,6 +53,23 @@ orders:
 
 costs:
   trip_id, cost_code, description, amount, cost_type (cost/revenue), custom_description
+  ── TULOSSA (spec v1.1) ──
+  order_id, line_type, is_auto, created_by, reversed_by (#6)
+  reversal_of_id — vastakirjaus lukitulle keikalle (#7)
+
+orders ── TULOSSA (spec v1.1, #6):
+  pricing_type, product_type, chargeable_weight,
+  payer_customer_id — oletus incotermsista: DAP/DDP/CPT/CIP → lähettäjä,
+  EXW/FCA → vastaanottaja, muokattavissa
+
+HINNOITTELUMOOTTORIN BACKLOG (docs/pricing-engine-spec.md v1.1, label pricing):
+  #5 asiakashinnasto + lisäsäännöt · #6 tilauksen hinnanmuodostus (maksaja,
+  pass_through, created_by) · #7 tripin automaattikulut (mantereen vetäjä,
+  tyhjä ajo, trailervuokra FEC-päivillä, vastakirjaus) · #8 käyttöliittymät
+  (TripDetail: Kulut/Myynti/Kate, OrderDetail: Hinnoittelu/Costing) ·
+  #9 kate ja raportit ("sisältyy muihin kuluihin") · #13 km:t kartalta
+  (OpenRouteService) · #14 demodata + freight.db pois gitistä ·
+  #15 käyttäjät ja roolit (oikeusmatriisi spec luku 16)
 
 services: ✅ VALMIS (issue #2, hinnoittelun vaihe 1)
   code (PK), name, category, default_cost_type, active
