@@ -1,8 +1,8 @@
 import sqlite3
 
 
-def _setup_trip_env(db_path):
-    """Insert carrier, trailer, trip and fuel_rate directly into test DB."""
+def _setup_trip_env(c, db_path):
+    """Insert carrier, trailer and trip into test DB; fuel rate via the API."""
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute(
@@ -22,18 +22,18 @@ def _setup_trip_env(db_path):
         (carrier_id, trailer_id),
     )
     trip_db_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
-    conn.execute(
-        "INSERT INTO fuel_rates (valid_from, valid_to, multiplier) "
-        "VALUES ('2026-11-01', '2026-11-30', 1.18)"
-    )
     conn.commit()
     conn.close()
+    resp = c.post("/api/fuel-rates", json={
+        "valid_from": "2026-11-01", "valid_to": "2026-11-30", "multiplier": 1.18,
+    })
+    assert resp.status_code == 201
     return trip_db_id
 
 
 def test_fuel_surcharge_added_on_freight(client):
     c, db_path = client
-    trip_id = _setup_trip_env(db_path)
+    trip_id = _setup_trip_env(c, db_path)
 
     resp = c.post(f"/api/trips/{trip_id}/costs", json={
         "cost_code": "120", "description": "FREIGHT",
@@ -56,7 +56,7 @@ def test_fuel_surcharge_added_on_freight(client):
 
 def test_no_fuel_surcharge_for_spot(client):
     c, db_path = client
-    trip_id = _setup_trip_env(db_path)
+    trip_id = _setup_trip_env(c, db_path)
 
     resp = c.post(f"/api/trips/{trip_id}/costs", json={
         "cost_code": "100", "description": "SPOT PRICE",
@@ -77,7 +77,7 @@ def test_no_fuel_surcharge_for_spot(client):
 def test_fuel_surcharge_type_is_revenue(client):
     """Auto-inserted code 200 must have cost_type='revenue', not 'cost'."""
     c, db_path = client
-    trip_id = _setup_trip_env(db_path)
+    trip_id = _setup_trip_env(c, db_path)
 
     c.post(f"/api/trips/{trip_id}/costs", json={
         "cost_code": "120", "description": "FREIGHT",
@@ -107,7 +107,7 @@ def _trailer_rows(db_path, trip_id):
 def test_trailer_rental_added_on_confirmation(client):
     """Status → Vahvistettu adds two code-400 rows: cost (leasing) + revenue (rental)."""
     c, db_path = client
-    trip_id = _setup_trip_env(db_path)
+    trip_id = _setup_trip_env(c, db_path)
 
     resp = c.put(f"/api/trips/{trip_id}/status", json={"status": "Vahvistettu"})
     assert resp.status_code == 200
@@ -123,7 +123,7 @@ def test_trailer_rental_added_on_confirmation(client):
 def test_trailer_rental_not_duplicated(client):
     """Re-confirming a trip must not add the trailer rows again."""
     c, db_path = client
-    trip_id = _setup_trip_env(db_path)
+    trip_id = _setup_trip_env(c, db_path)
 
     c.put(f"/api/trips/{trip_id}/status", json={"status": "Vahvistettu"})
     c.put(f"/api/trips/{trip_id}/status", json={"status": "Suunniteltu"})
@@ -135,7 +135,7 @@ def test_trailer_rental_not_duplicated(client):
 
 def test_no_legacy_trailer_code(client):
     c, db_path = client
-    trip_id = _setup_trip_env(db_path)
+    trip_id = _setup_trip_env(c, db_path)
     c.put(f"/api/trips/{trip_id}/status", json={"status": "Vahvistettu"})
     codes = {r["cost_code"] for r in _trailer_rows(db_path, trip_id)}
     assert "401" not in codes
