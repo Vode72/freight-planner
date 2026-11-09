@@ -265,7 +265,8 @@ function TripDetail() {
       description: newCost.cost_code === "820"
         ? (newCost.custom_description || "MUU KULU")
         : newCost.description,
-      amount: parseFloat(newCost.amount),
+      // Summa merkkijonona: backend jäsentää sen Decimaliksi (ei floatia)
+      amount: String(newCost.amount ?? "").trim(),
       cost_type: newCost.cost_type,
       custom_description: newCost.custom_description
     };
@@ -342,7 +343,7 @@ function TripDetail() {
       const res = await fetch(`http://127.0.0.1:5000/api/costs/${editingCostId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...editForm, amount: parseFloat(editForm.amount) || 0 })
+        body: JSON.stringify({ ...editForm, amount: String(editForm.amount ?? "").trim() || "0" })
       });
       if (res.ok) {
         toast.success("Kulurivi päivitetty");
