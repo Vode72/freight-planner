@@ -9,15 +9,27 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.15"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+        working-directory: backend
+
+      - name: Alembic upgrade head (tyhjä kanta)
+        run: |
+          python -m alembic -x db="$RUNNER_TEMP/ci.db" upgrade head
+          python -m alembic -x db="$RUNNER_TEMP/ci.db" current
+          python -m alembic -x db="$RUNNER_TEMP/ci.db" upgrade head
         working-directory: backend
 
       - name: Run pytest

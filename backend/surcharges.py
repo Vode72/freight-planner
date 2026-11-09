@@ -13,7 +13,9 @@ Kaikki hinnat ja operaattorit ovat keksittyä demodataa.
 """
 
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
+
+import money
 
 RATE_TYPES = ("percent", "fixed", "per_100kg", "per_km")
 TRADE_TYPES = ("EXP", "IMP", "CROSS", "DOM")
@@ -33,7 +35,7 @@ RATE_TYPE_BASE = {
     "per_km": "km",
 }
 
-_TWO_PLACES = Decimal("0.01")
+TABLE = "surcharge_rates"
 
 # Demodata — (service_code, cost_type, trade_type, product_type, country,
 #             operator, rate_type, rate, min_amount, max_amount, valid_from, valid_to)
@@ -76,29 +78,40 @@ SURCHARGE_COLUMNS = (
 # ── Skeema ja demodata ────────────────────────────────────────────────
 
 def ensure_surcharge_rates(conn):
-    """Luo surcharge_rates-taulun. Idempotentti."""
-    conn.execute("""
-CREATE TABLE IF NOT EXISTS surcharge_rates (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    service_code TEXT NOT NULL,
-    cost_type TEXT NOT NULL CHECK (cost_type IN ('revenue', 'cost')),
-    trade_type TEXT CHECK (trade_type IN ('EXP', 'IMP', 'CROSS', 'DOM')),
-    product_type TEXT CHECK (product_type IN ('FTL', 'LTL')),
-    country TEXT,
-    operator TEXT,
-    rate_type TEXT NOT NULL
-        CHECK (rate_type IN ('percent', 'fixed', 'per_100kg', 'per_km')),
-    rate REAL NOT NULL CHECK (rate >= 0),
-    min_amount REAL,
-    max_amount REAL,
-    valid_from TEXT NOT NULL,
-    valid_to TEXT
-)
-""")
-    conn.execute("""
-CREATE INDEX IF NOT EXISTS idx_surcharge_rates_lookup
-    ON surcharge_rates (service_code, cost_type, valid_from)
-""")
+    """Varmistaa skeeman (Alembic upgrade head). Idempotentti."""
+    from db_migrate import upgrade_connection
+    upgrade_connection(conn)
+
+
+def insert_rate(conn, values):
+    """Lisää rivin; values API-kentillä (rate, min_amount, max_amount euroina).
+
+    Palauttaa uuden rivin id:n.
+    """
+    data = money.values_to_db(TABLE, values)
+    cols = list(data)
+    cur = conn.execute(
+        f"INSERT INTO {TABLE} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+        [data[c] for c in cols],
+    )
+    return cur.lastrowid
+
+
+def update_rate(conn, rate_id, values):
+    data = money.values_to_db(TABLE, values)
+    cols = list(data)
+    conn.execute(
+        f"UPDATE {TABLE} SET {', '.join(c + ' = ?' for c in cols)} WHERE id = ?",
+        [data[c] for c in cols] + [rate_id],
+    )
+
+
+def get_rate(conn, rate_id, where=""):
+    row = conn.execute(
+        f"SELECT * FROM {TABLE} WHERE id = ? {('AND ' + where) if where else ''}",
+        (rate_id,),
+    ).fetchone()
+    return money.row_from_db(TABLE, row)
 
 
 def seed_surcharge_rates(conn):
@@ -106,11 +119,8 @@ def seed_surcharge_rates(conn):
     count = conn.execute("SELECT COUNT(*) FROM surcharge_rates").fetchone()[0]
     if count:
         return 0
-    conn.executemany(
-        f"INSERT INTO surcharge_rates ({', '.join(SURCHARGE_COLUMNS)}) "
-        f"VALUES ({', '.join('?' * len(SURCHARGE_COLUMNS))})",
-        DEMO_SURCHARGE_RATES,
-    )
+    for values in DEMO_SURCHARGE_RATES:
+        insert_rate(conn, dict(zip(SURCHARGE_COLUMNS, values)))
     return len(DEMO_SURCHARGE_RATES)
 
 
@@ -143,20 +153,21 @@ FUEL_ROW_FILTER = (
 
 
 def multiplier_to_rate(multiplier):
-    """Kerroin → prosentti: (m − 1) × 100, neljä desimaalia."""
-    return round((float(multiplier) - 1.0) * 100, 4)
+    """Kerroin → prosentti (Decimal): (m − 1) × 100, neljä desimaalia."""
+    return money.quantize((money.to_decimal(multiplier) - 1) * 100, money.E4)
 
 
 def rate_to_multiplier(rate):
-    """Prosentti → kerroin: 1 + rate / 100.
+    """Prosentti → kerroin (Decimal): 1 + rate / 100.
 
     Kuusi desimaalia, koska prosentissa on neljä (12.345 % ↔ 1.12345).
     """
-    return round(1.0 + float(rate) / 100, 6)
+    return (1 + money.to_decimal(rate) / 100).quantize(Decimal("0.000001"))
 
 
 def fuel_row_as_legacy(row):
-    """surcharge_rates-rivi vanhan /api/fuel-rates-vastauksen muotoon."""
+    """surcharge_rates-rivi (domain-muoto, ks. get_rate) vanhan
+    /api/fuel-rates-vastauksen muotoon."""
     row = dict(row)
     return {
         "id": row["id"],
@@ -186,7 +197,7 @@ def migrate_fuel_rates(conn):
     """Kertaluonteinen siirto fuel_rates → surcharge_rates (luku 7.5).
 
     Jokaisesta kertoimesta tulee rivi: 200 / revenue / percent,
-    rate = round((m − 1) × 100, 4). Kerroin ≤ 1 ohitetaan (ei lisää).
+    rate = (m − 1) × 100 Decimalina, 4 desimaalia (ROUND_HALF_UP). Kerroin ≤ 1 ohitetaan.
     Siirto merkitään schema_migrations-tauluun, joten uudelleenajo ei tee
     mitään — muuten /api/fuel-rates-kautta poistetut rivit palaisivat
     jokaisella käynnistyksellä. Lisäksi samanlaista riviä ei lisätä kahdesti.
@@ -205,22 +216,21 @@ def migrate_fuel_rates(conn):
         "SELECT valid_from, valid_to, multiplier FROM fuel_rates ORDER BY valid_from, id"
     ).fetchall()
     for valid_from, valid_to, multiplier in legacy:
-        if multiplier is None or float(multiplier) <= 1.0:
+        if multiplier is None or money.to_decimal(multiplier) <= 1:
             continue
         rate = multiplier_to_rate(multiplier)
         exists = conn.execute(
             f"SELECT 1 FROM surcharge_rates WHERE {FUEL_ROW_FILTER} "
-            "AND valid_from = ? AND valid_to IS ? AND rate = ?",
-            (valid_from, valid_to, rate),
+            "AND valid_from = ? AND valid_to IS ? AND rate_e4 = ?",
+            (valid_from, valid_to, money.to_e4(rate)),
         ).fetchone()
         if exists:
             continue
-        conn.execute(
-            "INSERT INTO surcharge_rates (service_code, cost_type, rate_type, "
-            "rate, valid_from, valid_to) VALUES (?, ?, ?, ?, ?, ?)",
-            (FUEL_SERVICE_CODE, FUEL_COST_TYPE, FUEL_RATE_TYPE, rate,
-             valid_from, valid_to),
-        )
+        insert_rate(conn, {
+            "service_code": FUEL_SERVICE_CODE, "cost_type": FUEL_COST_TYPE,
+            "rate_type": FUEL_RATE_TYPE, "rate": rate,
+            "valid_from": valid_from, "valid_to": valid_to,
+        })
         migrated += 1
     conn.execute(
         "INSERT INTO schema_migrations (name) VALUES (?)", (FUEL_MIGRATION_NAME,)
@@ -255,8 +265,8 @@ def _to_date(value):
 
 
 def round_amount(value):
-    """Kaksi desimaalia, puolikkaat ylöspäin (luku 4, kohta 7)."""
-    return float(Decimal(str(value)).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP))
+    """Kaksi desimaalia, puolikkaat ylöspäin (luku 4, kohta 7). Decimal."""
+    return money.round_money(value)
 
 
 def derive_trade_type(loading_country, unloading_country):
@@ -346,7 +356,7 @@ def compute_amount(rate, context):
         raise ValueError(f"Tuntematon rate_type: {rate_type}")
     base_field = RATE_TYPE_BASE[rate_type]
     base = None
-    price = Decimal(str(rate["rate"]))
+    price = money.to_decimal(rate["rate"])
     if base_field is None:
         amount = price
     else:
@@ -355,7 +365,10 @@ def compute_amount(rate, context):
             raise ValueError(
                 f"{base_field} puuttuu — tarvitaan rate_typelle {rate_type}"
             )
-        base = Decimal(str(raw))
+        try:
+            base = money.to_decimal(raw)
+        except ValueError:
+            raise ValueError(f"{base_field} ei ole numero: {raw!r}") from None
         if rate_type == "percent":
             amount = base * price / 100
         elif rate_type == "per_100kg":
@@ -366,13 +379,13 @@ def compute_amount(rate, context):
     capped = None
     min_amount = rate.get("min_amount")
     max_amount = rate.get("max_amount")
-    if min_amount is not None and amount < Decimal(str(min_amount)):
-        amount = Decimal(str(min_amount))
+    if min_amount is not None and amount < money.to_decimal(min_amount):
+        amount = money.to_decimal(min_amount)
         capped = "min"
-    if max_amount is not None and amount > Decimal(str(max_amount)):
-        amount = Decimal(str(max_amount))
+    if max_amount is not None and amount > money.to_decimal(max_amount):
+        amount = money.to_decimal(max_amount)
         capped = "max"
-    return round_amount(amount), (float(base) if base is not None else None), capped
+    return round_amount(amount), base, capped
 
 
 def fetch_rates(conn, service_code, cost_type=None):
@@ -381,7 +394,7 @@ def fetch_rates(conn, service_code, cost_type=None):
     if cost_type:
         sql += " AND cost_type = ?"
         params.append(cost_type)
-    return [dict(r) for r in conn.execute(sql, params).fetchall()]
+    return [money.row_from_db(TABLE, r) for r in conn.execute(sql, params).fetchall()]
 
 
 def calculate_surcharge(service_code, context, conn):
@@ -413,15 +426,9 @@ def calculate_surcharge(service_code, context, conn):
 
 # ── Syötteen validointi (API) ─────────────────────────────────────────
 
-def _opt_number(data, field, errors):
-    value = data.get(field)
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        errors.append(f"{field} ei ole numero")
-        return None
+def _opt_number(data, field, errors, scale=money.CENTS):
+    """Valinnainen rahakenttä → Decimal (pyöristettynä mittakaavaan) tai None."""
+    return money.parse_field(data, field, errors, scale)
 
 
 def validate_surcharge_payload(data, conn):
@@ -460,7 +467,7 @@ def validate_surcharge_payload(data, conn):
         errors.append(f"rate_type ei kelpaa: {rate_type}")
     clean["rate_type"] = rate_type
 
-    rate = _opt_number(data, "rate", errors)
+    rate = _opt_number(data, "rate", errors, money.E4)
     if rate is None and "rate ei ole numero" not in errors:
         errors.append("rate puuttuu")
     elif rate is not None and rate < 0:
@@ -510,4 +517,4 @@ def find_overlap(conn, clean, exclude_id=None):
         sql += " AND id != ?"
         params.append(exclude_id)
     row = conn.execute(sql, params).fetchone()
-    return dict(row) if row else None
+    return money.row_from_db(TABLE, row)

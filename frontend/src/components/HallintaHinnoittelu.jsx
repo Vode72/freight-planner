@@ -237,7 +237,8 @@ function LautatTab() {
   const openEdit = (r) => setModal({ ...r, valid_to: r.valid_to || "", price: String(r.price) });
 
   const handleSave = async () => {
-    const payload = { ...modal, price: parseFloat(modal.price), valid_to: modal.valid_to || null };
+    // Hinta merkkijonona: backend jäsentää sen Decimaliksi (ei floatia)
+    const payload = { ...modal, price: String(modal.price ?? "").trim(), valid_to: modal.valid_to || null };
     const url = modal.id ? `${API}/ferry-rates-db/${modal.id}` : `${API}/ferry-rates-db`;
     const method = modal.id ? "PUT" : "POST";
     const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });

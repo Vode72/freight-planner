@@ -5,8 +5,11 @@ calculate_surcharge-funktiolla ja /api/fuel-rates yhteensopivuuskerroksena.
 Kaikki kertoimet ja summat ovat demodataa.
 """
 import sqlite3
+from decimal import Decimal
 
 import pytest
+
+import money
 
 from init_db import create_schema
 from surcharges import (
@@ -40,14 +43,14 @@ def legacy_conn():
 
 
 def fuel_rows(conn):
-    return [dict(r) for r in conn.execute(
+    return [money.row_from_db("surcharge_rates", r) for r in conn.execute(
         f"SELECT * FROM surcharge_rates WHERE {FUEL_ROW_FILTER} ORDER BY valid_from"
     ).fetchall()]
 
 
 def old_fuel_amount(freight, multiplier):
-    """Ennen siirtoa käytetty kaava (app.add_cost)."""
-    return round(float(freight) * (multiplier - 1.0), 2)
+    """Ennen siirtoa käytetty kaava (app.add_cost), Decimalina vertailua varten."""
+    return Decimal(str(round(float(freight) * (multiplier - 1.0), 2)))
 
 
 # ── Muunnokset ────────────────────────────────────────────────────────
@@ -56,8 +59,8 @@ def old_fuel_amount(freight, multiplier):
     (1.15, 15.0), (1.18, 18.0), (1.185, 18.5), (1.0, 0.0), (1.12345, 12.345),
 ])
 def test_multiplier_rate_roundtrip(multiplier, rate):
-    assert multiplier_to_rate(multiplier) == rate
-    assert rate_to_multiplier(rate) == multiplier
+    assert multiplier_to_rate(multiplier) == Decimal(str(rate))
+    assert rate_to_multiplier(rate) == Decimal(str(multiplier))
 
 
 def test_rate_has_no_float_noise():
@@ -101,8 +104,8 @@ def test_migration_runs_only_once(legacy_conn):
 
 def test_migration_skips_existing_identical_row(legacy_conn):
     legacy_conn.execute(
-        "INSERT INTO surcharge_rates (service_code, cost_type, rate_type, rate, "
-        "valid_from, valid_to) VALUES ('200', 'revenue', 'percent', 18.0, "
+        "INSERT INTO surcharge_rates (service_code, cost_type, rate_type, rate_e4, "
+        "valid_from, valid_to) VALUES ('200', 'revenue', 'percent', 180000, "
         "'2026-03-01', '2026-03-31')"
     )
     assert migrate_fuel_rates(legacy_conn) == 4
@@ -180,7 +183,7 @@ def _fuel_costs(db_path, trip_id):
         "SELECT * FROM costs WHERE trip_id = ? AND cost_code = '200'", (trip_id,)
     ).fetchall()
     conn.close()
-    return rows
+    return [money.row_from_db("costs", r) for r in rows]
 
 
 @pytest.mark.parametrize("loading_date, multiplier", [
@@ -291,8 +294,8 @@ def test_api_post_writes_surcharge_row(client):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM surcharge_rates WHERE id = ?", (body["id"],)).fetchone()
-    assert (row["service_code"], row["cost_type"], row["rate_type"], row["rate"]) == (
-        "200", "revenue", "percent", 18.5)
+    assert (row["service_code"], row["cost_type"], row["rate_type"], row["rate_e4"]) == (
+        "200", "revenue", "percent", 185000)
     assert conn.execute("SELECT COUNT(*) FROM fuel_rates").fetchone()[0] == 0
     conn.close()
     assert c.get("/api/fuel-rates").get_json()[0]["multiplier"] == 1.185

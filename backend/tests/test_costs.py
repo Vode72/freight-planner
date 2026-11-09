@@ -10,8 +10,9 @@ def _setup_trip_env(c, db_path):
     )
     carrier_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
     conn.execute(
-        "INSERT INTO trailers (plate_number, identifier, trailer_type, leasing_rate, rental_rate) "
-        "VALUES ('TST-001', 'T-001', 'Pressutrailer', 35.0, 54.0)"
+        "INSERT INTO trailers (plate_number, identifier, trailer_type, "
+        "leasing_rate_cents, rental_rate_cents) "
+        "VALUES ('TST-001', 'T-001', 'Pressutrailer', 3500, 5400)"
     )
     trailer_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
     conn.execute(
@@ -45,12 +46,12 @@ def test_fuel_surcharge_added_on_freight(client):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute(
-        "SELECT amount, cost_type FROM costs WHERE trip_id=? AND cost_code='200'",
+        "SELECT amount_cents, cost_type FROM costs WHERE trip_id=? AND cost_code='200'",
         (trip_id,),
     ).fetchone()
     conn.close()
     assert row is not None
-    assert round(row["amount"], 2) == 180.0   # 1000 × (1.18 − 1.0)
+    assert row["amount_cents"] == 18000   # 1000 × (1.18 − 1.0) = 180,00 €
     assert row["cost_type"] == "revenue"
 
 
@@ -97,7 +98,7 @@ def _trailer_rows(db_path, trip_id):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT cost_code, amount, cost_type FROM costs WHERE trip_id=? ORDER BY cost_type",
+        "SELECT cost_code, amount_cents, cost_type FROM costs WHERE trip_id=? ORDER BY cost_type",
         (trip_id,),
     ).fetchall()
     conn.close()
@@ -116,8 +117,8 @@ def test_trailer_rental_added_on_confirmation(client):
     assert [r["cost_code"] for r in rows] == ["400", "400"]
     by_type = {r["cost_type"]: r for r in rows}
     # loading 2026-11-03, delivery 2026-11-07 → (7−3) + 1 = 5 days
-    assert by_type["cost"]["amount"] == 175.0     # 5 × 35.0
-    assert by_type["revenue"]["amount"] == 270.0  # 5 × 54.0
+    assert by_type["cost"]["amount_cents"] == 17500     # 5 × 35,00 €
+    assert by_type["revenue"]["amount_cents"] == 27000  # 5 × 54,00 €
 
 
 def test_trailer_rental_not_duplicated(client):

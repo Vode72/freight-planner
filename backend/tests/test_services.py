@@ -118,14 +118,14 @@ def _insert_legacy_rows(db_path):
     )
     trip_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.executemany(
-        "INSERT INTO costs (trip_id, cost_code, description, amount, cost_type) "
+        "INSERT INTO costs (trip_id, cost_code, description, amount_cents, cost_type) "
         "VALUES (?, ?, ?, ?, ?)",
         [
-            (trip_id, "400", "TRAILERVUOKRA (osto)", 100.0, "cost"),
-            (trip_id, "401", "TRAILERVUOKRA (myynti)", 150.0, "revenue"),
-            (trip_id, "830", "YLIKÄYTTÖ (osto)", 20.0, "cost"),
-            (trip_id, "831", "YLIKÄYTTÖ (myynti)", 35.0, "revenue"),
-            (trip_id, "120", "FREIGHT", 1000.0, "revenue"),
+            (trip_id, "400", "TRAILERVUOKRA (osto)", 10000, "cost"),
+            (trip_id, "401", "TRAILERVUOKRA (myynti)", 15000, "revenue"),
+            (trip_id, "830", "YLIKÄYTTÖ (osto)", 2000, "cost"),
+            (trip_id, "831", "YLIKÄYTTÖ (myynti)", 3500, "revenue"),
+            (trip_id, "120", "FREIGHT", 100000, "revenue"),
         ],
     )
     conn.commit()
@@ -137,7 +137,7 @@ def _cost_rows(db_path, trip_id):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT cost_code, description, amount, cost_type FROM costs "
+        "SELECT cost_code, description, amount_cents, cost_type FROM costs "
         "WHERE trip_id=? ORDER BY id",
         (trip_id,),
     ).fetchall()
@@ -152,11 +152,11 @@ def test_migration_merges_legacy_codes(client):
     run_services(db_path)
 
     assert _cost_rows(db_path, trip_id) == [
-        ("400", "TRAILERVUOKRA (osto)", 100.0, "cost"),
-        ("400", "TRAILERVUOKRA (myynti)", 150.0, "revenue"),
-        ("830", "YLIKÄYTTÖ (osto)", 20.0, "cost"),
-        ("830", "YLIKÄYTTÖ (myynti)", 35.0, "revenue"),
-        ("120", "FREIGHT", 1000.0, "revenue"),
+        ("400", "TRAILERVUOKRA (osto)", 10000, "cost"),
+        ("400", "TRAILERVUOKRA (myynti)", 15000, "revenue"),
+        ("830", "YLIKÄYTTÖ (osto)", 2000, "cost"),
+        ("830", "YLIKÄYTTÖ (myynti)", 3500, "revenue"),
+        ("120", "FREIGHT", 100000, "revenue"),
     ]
 
 

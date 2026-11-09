@@ -1,190 +1,188 @@
 import sqlite3
+from datetime import date, timedelta
 
-from services import ensure_services
+import money
+from db_migrate import upgrade_connection
 
 
 def create_schema(conn):
-    """Create all base tables (no DROPs). Safe to call on any connection."""
-    cursor = conn.cursor()
+    """Luo tai päivittää skeeman Alembic-migraatioilla (alembic upgrade head).
 
-    cursor.execute("""
-CREATE TABLE IF NOT EXISTS trips (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    trip_id TEXT UNIQUE,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    status TEXT DEFAULT 'Suunniteltu',
-    first_pickup_country TEXT,
-    first_pickup_zip TEXT,
-    first_pickup_city TEXT,
-    trip_end_country TEXT,
-    trip_end_zip TEXT,
-    trip_end_city TEXT,
-    transport_type TEXT DEFAULT 'Suora',
-    carrier_id INTEGER,
-    trailer_id INTEGER,
-    trailer_type TEXT,
-    truck_plate TEXT,
-    loading_date TEXT,
-    loading_time_start TEXT,
-    loading_time_end TEXT,
-    delivery_date TEXT,
-    delivery_time_start TEXT,
-    delivery_time_end TEXT,
-    fixed_delivery_date INTEGER DEFAULT 0,
-    ferry_route TEXT,
-    ferry_departure TEXT,
-    ferry_arrival TEXT,
-    adr INTEGER DEFAULT 0,
-    tail_lift INTEGER DEFAULT 0,
-    temperature_controlled INTEGER DEFAULT 0,
-    loading_instructions TEXT,
-    notes TEXT,
-    loading_started_at TEXT,
-    loading_completed_at TEXT,
-    delivery_started_at TEXT,
-    delivery_completed_at TEXT,
-    delivered_at TEXT,
-    FOREIGN KEY (carrier_id) REFERENCES carriers(id),
-    FOREIGN KEY (trailer_id) REFERENCES trailers(id)
-)
-""")
-
-    cursor.execute("""
-CREATE TABLE IF NOT EXISTS orders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id TEXT UNIQUE,
-    trip_id INTEGER,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    status TEXT DEFAULT 'Vapaa',
-    order_reference TEXT,
-    pickup_reference TEXT,
-    goods_description TEXT,
-    incoterms TEXT,
-    consignor_name TEXT,
-    consignor_address TEXT,
-    consignor_country TEXT,
-    consignee_name TEXT,
-    consignee_address TEXT,
-    consignee_country TEXT,
-    loading_point_name TEXT,
-    loading_point_country TEXT,
-    loading_point_zip TEXT,
-    loading_point_city TEXT,
-    unloading_point_name TEXT,
-    unloading_point_country TEXT,
-    unloading_point_zip TEXT,
-    unloading_point_city TEXT,
-    pallet_type TEXT,
-    quantity INTEGER DEFAULT 1,
-    pallet_width REAL DEFAULT 0,
-    pallet_length REAL DEFAULT 0,
-    pallet_height REAL DEFAULT 0,
-    loading_meters REAL DEFAULT 0,
-    volume REAL DEFAULT 0,
-    weight REAL DEFAULT 0,
-    stackable INTEGER DEFAULT 0,
-    adr INTEGER DEFAULT 0,
-    tail_lift INTEGER DEFAULT 0,
-    insured INTEGER DEFAULT 0,
-    high_value INTEGER DEFAULT 0,
-    pre_advise INTEGER DEFAULT 0,
-    time_slot_loading INTEGER DEFAULT 0,
-    time_slot_delivery INTEGER DEFAULT 0,
-    min_temperature REAL,
-    max_temperature REAL,
-    temperature_monitoring INTEGER DEFAULT 0,
-    required_compartment TEXT DEFAULT 'koko kärry',
-    loading_instructions TEXT,
-    loading_date TEXT,
-    loading_time_start TEXT,
-    loading_time_end TEXT,
-    delivery_date TEXT,
-    delivery_time_start TEXT,
-    delivery_time_end TEXT,
-    FOREIGN KEY (trip_id) REFERENCES trips(id)
-)
-""")
-
-    cursor.execute("""
-CREATE TABLE IF NOT EXISTS costs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    trip_id INTEGER NOT NULL,
-    cost_code TEXT NOT NULL,
-    description TEXT NOT NULL,
-    amount REAL DEFAULT 0,
-    cost_type TEXT DEFAULT 'cost',
-    custom_description TEXT,
-    FOREIGN KEY (trip_id) REFERENCES trips(id)
-)
-""")
-
-    cursor.execute("""
-CREATE TABLE IF NOT EXISTS trailers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    plate_number TEXT NOT NULL,
-    identifier TEXT NOT NULL,
-    trailer_type TEXT NOT NULL,
-    leasing_company TEXT DEFAULT 'Demo Trailer Leasing Oy',
-    leasing_rate REAL DEFAULT 0,
-    rental_rate REAL DEFAULT 0,
-    status TEXT DEFAULT 'Vapaa'
-)
-""")
-
-    cursor.execute("""
-CREATE TABLE IF NOT EXISTS carriers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    country TEXT NOT NULL,
-    city TEXT NOT NULL,
-    business_id TEXT,
-    contact_person TEXT,
-    phone TEXT
-)
-""")
-
-    cursor.execute("""
-CREATE TABLE IF NOT EXISTS trucks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    plate_number TEXT NOT NULL,
-    carrier_id INTEGER NOT NULL,
-    status TEXT DEFAULT 'Vapaa',
-    FOREIGN KEY (carrier_id) REFERENCES carriers(id)
-)
-""")
-
-    cursor.execute("""
-CREATE TABLE IF NOT EXISTS customers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    business_id TEXT,
-    address TEXT,
-    zip TEXT,
-    city TEXT,
-    country TEXT NOT NULL DEFAULT 'FI',
-    contact_person TEXT,
-    phone TEXT,
-    email TEXT,
-    customer_type TEXT DEFAULT 'molemmat',
-    notes TEXT
-)
-""")
-
-    cursor.execute("""
-CREATE TABLE IF NOT EXISTS fuel_rates (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    valid_from TEXT NOT NULL,
-    valid_to TEXT NOT NULL,
-    multiplier REAL NOT NULL,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-)
-""")
-
-    ensure_services(conn)
+    Skeeman ainoa lähde ovat migrations/versions-revisiot. Toimii myös
+    muistikantaan ja olemassa olevaan kantaan.
+    """
+    upgrade_connection(conn)
 
 
 def seed_demo_data(conn):
-    """Insert demo data. Assumes create_schema() has already been called."""
+    """Koko demodata: perusdata + viitedemodata. create_schema() ajettu ensin."""
+    seed_base_demo(conn)
+    seed_reference_demo(conn)
+
+
+def seed_reference_demo(conn):
+    """Demodata, jonka vanhat migrate_*.py-skriptit lisäsivät: maarajoitukset,
+    terminaalit, huollot, km- ja lauttahinnat, lisähinnat (+ polttoainelisän
+    siirto fuel_rates-taulusta) ja asiakashinnasto. Ei commitoi."""
+    from surcharges import seed_surcharge_rates, migrate_fuel_rates
+    from customer_pricing import seed_customer_pricing
+    cursor = conn.cursor()
+    _seed_restrictions_demo(cursor)
+    _seed_hallinta_demo(cursor)
+    seed_surcharge_rates(conn)
+    migrate_fuel_rates(conn)
+    seed_customer_pricing(conn)
+
+
+def _seed_restrictions_demo(cursor):
+    cursor.execute("DELETE FROM country_restrictions")
+    restrictions = [
+        ("CH", "SUNDAY_BAN",  "sun", None,    None,    "00:00", "24:00", 3.5,  "Sunnuntaikielto — ei poikkeuksia", "red",    "Ei poikkeuksia"),
+        ("CH", "NIGHT_BAN",   "all", None,    None,    "22:00", "05:00", 3.5,  "Yöajokielto joka yö",              "red",    None),
+        ("CH", "WEIGHT_LIMIT","all", None,    None,    None,    None,    40.0, "Max GVW 40t (EU 44t ei kelpaa)",   "red",    None),
+        ("DE", "SUNDAY_BAN",  "sun", None,    None,    "00:00", "22:00", 7.5,  "Sunnuntaikielto",                  "orange", None),
+        ("DE", "SUMMER_BAN",  "sat", "07-01", "08-31", "00:00", "22:00", 7.5,  "Kesälauantairajoitus heinä-elokuu","yellow", "Tietyt päätiet"),
+        ("AT", "SUNDAY_BAN",  "sun", None,    None,    "00:00", "22:00", 7.5,  "Sunnuntaikielto",                  "orange", None),
+        ("AT", "NIGHT_BAN",   "all", "11-01", "03-31", "22:00", "05:00", 7.5,  "Brenner-reitin yökielto talvikaudella", "orange", None),
+        ("FR", "SUNDAY_BAN",  "sun", None,    None,    "00:00", "22:00", 7.5,  "Sunnuntaikielto",                  "orange", None),
+        ("IT", "SUNDAY_BAN",  "sun", None,    None,    "07:00", "22:00", 7.5,  "Sunnuntaikielto",                  "orange", None),
+        ("IT", "SUMMER_BAN",  "sat", "06-01", "09-30", "08:00", "16:00", 7.5,  "Kesälauantairajoitus",             "yellow", None),
+        ("IT", "WEIGHT_LIMIT","all", None,    None,    None,    None,    44.0, "Max GVW 44t",                      "orange", None),
+        ("PL", "SUNDAY_BAN",  "sun", None,    None,    "08:00", "22:00", 12.0, "Sunnuntaikielto",                  "orange", None),
+        ("CZ", "SUNDAY_BAN",  "sun", None,    None,    "13:00", "22:00", 7.5,  "Sunnuntaikielto",                  "yellow", None),
+        ("SK", "SUNDAY_BAN",  "sun", None,    None,    "00:00", "22:00", 7.5,  "Sunnuntaikielto",                  "orange", None),
+        ("LU", "SUNDAY_BAN",  "sun", None,    None,    "00:00", "21:45", 7.5,  "Sunnuntaikielto",                  "orange", None),
+    ]
+    cursor.executemany("""
+        INSERT INTO country_restrictions
+            (country_code, restriction_type, day_of_week, date_from, date_to,
+             time_from, time_to, min_weight_t, description, severity, exemptions)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    """, restrictions)
+
+    cursor.execute("DELETE FROM terminals")
+    terminals = [
+        ("Demo Terminal Helsinki",   "FI", "Helsinki",  "Vuosaarentie 10, 00980 Helsinki"),
+        ("Demo Terminal Tampere",    "FI", "Tampere",   "Naistenlahdenranta 4, 33200 Tampere"),
+        ("Demo Terminal Antwerpen",  "BE", "Antwerpen", "Havenstraat 12, 2030 Antwerpen"),
+        ("Demo Terminal Bruxelles",  "BE", "Bruxelles", "Rue du Port 8, 1000 Bruxelles"),
+        ("Demo Terminal Rotterdam",  "NL", "Rotterdam", "Waalhaven 34, 3087 Rotterdam"),
+        ("Demo Terminal Amsterdam",  "NL", "Amsterdam", "Westpoort 17, 1048 Amsterdam"),
+        ("Demo Terminal Hamburg",    "DE", "Hamburg",   "Hafenweg 22, 20457 Hamburg"),
+        ("Demo Terminal Frankfurt",  "DE", "Frankfurt", "Industriestr. 45, 60327 Frankfurt am Main"),
+        ("Demo Terminal Paris",      "FR", "Rungis",    "Rue de la Logistique 5, 94150 Rungis"),
+        ("Demo Terminal Lyon",       "FR", "Lyon",      "Avenue du Port 18, 69007 Lyon"),
+        ("Demo Terminal Zürich",     "CH", "Zürich",    "Industriestrasse 8, 8005 Zürich"),
+        ("Demo Terminal Basel",      "CH", "Basel",     "Rheinweg 14, 4058 Basel"),
+        ("Demo Terminal Wien",       "AT", "Wien",      "Laxenburger Str. 20, 1100 Wien"),
+        ("Demo Terminal Innsbruck",  "AT", "Innsbruck", "Innsbrucker Str. 3, 6020 Innsbruck"),
+        ("Demo Terminal Milano",     "IT", "Milano",    "Via della Logistica 9, 20142 Milano"),
+        ("Demo Terminal Roma",       "IT", "Roma",      "Via Portuense 33, 00148 Roma"),
+    ]
+    cursor.executemany(
+        "INSERT INTO terminals (name, country_code, city, address) VALUES (?,?,?,?)",
+        terminals,
+    )
+
+
+def _seed_hallinta_demo(cursor):
+    trailers = cursor.execute("SELECT plate_number, trailer_type FROM trailers").fetchall()
+    trailer_map = {t[0]: t[1] for t in trailers}
+
+    cursor.execute("DELETE FROM trailer_maintenance")
+
+    today = date.today()
+    maintenance_rows = []
+
+    for plate, days_ago, next_days in [
+        ("URV-001", 365, 365),
+        ("URV-002", 180, 545),
+        ("SRV-001", 270, 460),
+        ("CRT-001", 90, 640),
+        ("HRV-001", 400, 330),
+    ]:
+        if plate in trailer_map:
+            maintenance_rows.append((
+                plate, "INSPECTION",
+                (today - timedelta(days=days_ago)).isoformat(),
+                (today + timedelta(days=next_days - days_ago)).isoformat(),
+                "Katsastus OK",
+            ))
+
+    for plate, days_ago, next_days in [
+        ("URV-001", 120, 180),
+        ("URV-002", 30, 150),
+        ("TRV-001", 200, -20),
+    ]:
+        ttype = trailer_map.get(plate, "")
+        if "Umpikaappi" in ttype:
+            maintenance_rows.append((
+                plate, "REFRIGERATION",
+                (today - timedelta(days=days_ago)).isoformat(),
+                (today + timedelta(days=next_days)).isoformat(),
+                "Kylmäkonehuolto suoritettu",
+            ))
+
+    cursor.executemany(
+        "INSERT INTO trailer_maintenance (trailer_id, maintenance_type, date, next_due, notes) "
+        "VALUES (?,?,?,?,?)",
+        maintenance_rows,
+    )
+
+    if "HRV-001" in trailer_map:
+        cursor.execute(
+            "UPDATE trailers SET inspection_date='2025-05-01', inspection_due=? WHERE plate_number='HRV-001'",
+            ((today - timedelta(days=20)).isoformat(),),
+        )
+    for plate, insp_date, delta in [
+        ("URV-003", "2025-11-01", 18),
+        ("CRT-002", "2025-11-15", 25),
+        ("URV-001", "2025-06-01", 365 - 120),
+        ("URV-002", "2025-12-01", 180),
+        ("SRV-001", "2025-08-01", 90),
+        ("CRT-001", "2026-01-15", 120),
+    ]:
+        if plate in trailer_map:
+            cursor.execute(
+                f"UPDATE trailers SET inspection_date=?, inspection_due=? WHERE plate_number=?",
+                (insp_date, (today + timedelta(days=delta)).isoformat(), plate),
+            )
+
+    for plate, svc_date, delta, interval in [
+        ("URV-001", "2025-12-01", 60, 6),
+        ("URV-002", "2026-01-15", 15, 6),
+        ("TRV-001", "2025-10-01", -20, 6),
+        ("TRV-002", "2026-02-01", 95, 6),
+    ]:
+        if plate in trailer_map:
+            cursor.execute(
+                "UPDATE trailers SET refrigeration_service_date=?, refrigeration_service_due=?, "
+                "refrigeration_service_interval_months=? WHERE plate_number=?",
+                (svc_date, (today + timedelta(days=delta)).isoformat(), interval, plate),
+            )
+
+    cursor.execute("DELETE FROM km_rates")
+    cursor.execute(
+        "INSERT INTO km_rates (valid_from, valid_to, domestic_rate_e4, continent_rate_e4, notes) "
+        "VALUES ('2026-01-01', NULL, ?, ?, 'Perushinnoittelu 2026')",
+        (money.to_e4("1.85"), money.to_e4("2.20")),
+    )
+
+    cursor.execute("DELETE FROM ferry_rates")
+    ferry_routes = [
+        ("Helsinki - Travemünde", 1050, "2026-01-01", None),
+        ("Hanko - Lübeck",        1010, "2026-01-01", None),
+        ("Hanko - Rostock",        750, "2026-01-01", None),
+        ("Kotka - Antwerpen",     1800, "2026-01-01", None),
+    ]
+    cursor.executemany(
+        "INSERT INTO ferry_rates (route, price_cents, valid_from, valid_to) VALUES (?,?,?,?)",
+        [(route, money.to_cents(price), vf, vt) for route, price, vf, vt in ferry_routes],
+    )
+
+
+def seed_base_demo(conn):
+    """Perusdemodata: trailerit, kuljettajat, asiakkaat, tripit, orderit, kulut."""
     cursor = conn.cursor()
 
     trailers = [
@@ -201,10 +199,12 @@ def seed_demo_data(conn):
         ("HRV-001", "CM-4101", "Megatrailer", 38, 59),
         ("HRV-002", "CM-4102", "Megatrailer", 38, 59),
     ]
+    # leasing_rate / rental_rate €/pv → sentteinä
     cursor.executemany(
-        "INSERT INTO trailers (plate_number, identifier, trailer_type, leasing_rate, rental_rate) "
-        "VALUES (?, ?, ?, ?, ?)",
-        trailers,
+        "INSERT INTO trailers (plate_number, identifier, trailer_type, "
+        "leasing_rate_cents, rental_rate_cents) VALUES (?, ?, ?, ?, ?)",
+        [(plate, ident, ttype, money.to_cents(leasing), money.to_cents(rental))
+         for plate, ident, ttype, leasing, rental in trailers],
     )
 
     carriers = [
@@ -430,79 +430,74 @@ def seed_demo_data(conn):
     # ja muut lisät sisältyvät spot-hintaan, joten 400 on vain kulurivinä.
     costs_demo = [
         # Trip 1 — Suunniteltu FI→DE (2 orderia)
-        (trip_db_ids[0], "120", "FREIGHT", 3400.0, "revenue", None),
-        (trip_db_ids[0], "200", "POLTTOAINELISÄ", 646.0, "revenue", None),
-        (trip_db_ids[0], "210", "KOTIMAAN AJO, KUORMATTU", 180.0, "cost", None),
-        (trip_db_ids[0], "500", "LAUTTA", 1050.0, "cost", None),
-        (trip_db_ids[0], "220", "MANTEREEN AJO, KUORMATTU", 1950.0, "cost", None),
-        (trip_db_ids[0], "300", "SAKSAN TIEMAKSU", 120.0, "cost", None),
+        (trip_db_ids[0], "120", "FREIGHT", "3400.00", "revenue", None),
+        (trip_db_ids[0], "200", "POLTTOAINELISÄ", "646.00", "revenue", None),
+        (trip_db_ids[0], "210", "KOTIMAAN AJO, KUORMATTU", "180.00", "cost", None),
+        (trip_db_ids[0], "500", "LAUTTA", "1050.00", "cost", None),
+        (trip_db_ids[0], "220", "MANTEREEN AJO, KUORMATTU", "1950.00", "cost", None),
+        (trip_db_ids[0], "300", "SAKSAN TIEMAKSU", "120.00", "cost", None),
         # Trip 2 — Vahvistettu FI→SE lautta
-        (trip_db_ids[1], "120", "FREIGHT", 1450.0, "revenue", None),
-        (trip_db_ids[1], "200", "POLTTOAINELISÄ", 275.5, "revenue", None),
-        (trip_db_ids[1], "400", "TRAILERVUOKRA (myynti) 2 pv x 70 €", 140.0, "revenue", None),
-        (trip_db_ids[1], "400", "TRAILERVUOKRA (osto) 2 pv x 45 €", 90.0, "cost", None),
-        (trip_db_ids[1], "210", "KOTIMAAN AJO, KUORMATTU", 120.0, "cost", None),
-        (trip_db_ids[1], "500", "LAUTTA", 680.0, "cost", None),
-        (trip_db_ids[1], "220", "MANTEREEN AJO, KUORMATTU", 650.0, "cost", None),
+        (trip_db_ids[1], "120", "FREIGHT", "1450.00", "revenue", None),
+        (trip_db_ids[1], "200", "POLTTOAINELISÄ", "275.50", "revenue", None),
+        (trip_db_ids[1], "400", "TRAILERVUOKRA (myynti) 2 pv x 70 €", "140.00", "revenue", None),
+        (trip_db_ids[1], "400", "TRAILERVUOKRA (osto) 2 pv x 45 €", "90.00", "cost", None),
+        (trip_db_ids[1], "210", "KOTIMAAN AJO, KUORMATTU", "120.00", "cost", None),
+        (trip_db_ids[1], "500", "LAUTTA", "680.00", "cost", None),
+        (trip_db_ids[1], "220", "MANTEREEN AJO, KUORMATTU", "650.00", "cost", None),
         # Trip 3 — Käynnissä FI→NL (3 orderia)
-        (trip_db_ids[2], "120", "FREIGHT", 4300.0, "revenue", None),
-        (trip_db_ids[2], "200", "POLTTOAINELISÄ", 817.0, "revenue", None),
-        (trip_db_ids[2], "400", "TRAILERVUOKRA (myynti) 5 pv x 54 €", 270.0, "revenue", None),
-        (trip_db_ids[2], "400", "TRAILERVUOKRA (osto) 5 pv x 35 €", 175.0, "cost", None),
-        (trip_db_ids[2], "210", "KOTIMAAN AJO, KUORMATTU", 160.0, "cost", None),
-        (trip_db_ids[2], "500", "LAUTTA", 1050.0, "cost", None),
-        (trip_db_ids[2], "220", "MANTEREEN AJO, KUORMATTU", 2800.0, "cost", None),
-        (trip_db_ids[2], "310", "HOLLANTI + SAKSA TIEMAKSU", 260.0, "cost", None),
+        (trip_db_ids[2], "120", "FREIGHT", "4300.00", "revenue", None),
+        (trip_db_ids[2], "200", "POLTTOAINELISÄ", "817.00", "revenue", None),
+        (trip_db_ids[2], "400", "TRAILERVUOKRA (myynti) 5 pv x 54 €", "270.00", "revenue", None),
+        (trip_db_ids[2], "400", "TRAILERVUOKRA (osto) 5 pv x 35 €", "175.00", "cost", None),
+        (trip_db_ids[2], "210", "KOTIMAAN AJO, KUORMATTU", "160.00", "cost", None),
+        (trip_db_ids[2], "500", "LAUTTA", "1050.00", "cost", None),
+        (trip_db_ids[2], "220", "MANTEREEN AJO, KUORMATTU", "2800.00", "cost", None),
+        (trip_db_ids[2], "310", "HOLLANTI + SAKSA TIEMAKSU", "260.00", "cost", None),
         # Trip 4 — Toimitettu FI→DE (2 orderia)
-        (trip_db_ids[3], "120", "FREIGHT", 4100.0, "revenue", None),
-        (trip_db_ids[3], "200", "POLTTOAINELISÄ", 779.0, "revenue", None),
-        (trip_db_ids[3], "400", "TRAILERVUOKRA (myynti) 4 pv x 67 €", 268.0, "revenue", None),
-        (trip_db_ids[3], "400", "TRAILERVUOKRA (osto) 4 pv x 43 €", 172.0, "cost", None),
-        (trip_db_ids[3], "210", "KOTIMAAN AJO, KUORMATTU", 720.0, "cost", None),
-        (trip_db_ids[3], "500", "LAUTTA", 1050.0, "cost", None),
-        (trip_db_ids[3], "220", "MANTEREEN AJO, KUORMATTU", 2350.0, "cost", None),
-        (trip_db_ids[3], "300", "SAKSAN TIEMAKSU", 190.0, "cost", None),
+        (trip_db_ids[3], "120", "FREIGHT", "4100.00", "revenue", None),
+        (trip_db_ids[3], "200", "POLTTOAINELISÄ", "779.00", "revenue", None),
+        (trip_db_ids[3], "400", "TRAILERVUOKRA (myynti) 4 pv x 67 €", "268.00", "revenue", None),
+        (trip_db_ids[3], "400", "TRAILERVUOKRA (osto) 4 pv x 43 €", "172.00", "cost", None),
+        (trip_db_ids[3], "210", "KOTIMAAN AJO, KUORMATTU", "720.00", "cost", None),
+        (trip_db_ids[3], "500", "LAUTTA", "1050.00", "cost", None),
+        (trip_db_ids[3], "220", "MANTEREEN AJO, KUORMATTU", "2350.00", "cost", None),
+        (trip_db_ids[3], "300", "SAKSAN TIEMAKSU", "190.00", "cost", None),
         # Trip 5 — Laskutettu FI→EE, spot
-        (trip_db_ids[4], "100", "SPOT", 1650.0, "revenue", None),
-        (trip_db_ids[4], "400", "TRAILERVUOKRA (osto) 2 pv x 42 €", 84.0, "cost", None),
-        (trip_db_ids[4], "210", "KOTIMAAN AJO, KUORMATTU", 150.0, "cost", None),
-        (trip_db_ids[4], "500", "LAUTTA", 620.0, "cost", None),
-        (trip_db_ids[4], "510", "SATAMAMAKSU", 60.0, "cost", None),
-        (trip_db_ids[4], "220", "MANTEREEN AJO, KUORMATTU", 440.0, "cost", None),
+        (trip_db_ids[4], "100", "SPOT", "1650.00", "revenue", None),
+        (trip_db_ids[4], "400", "TRAILERVUOKRA (osto) 2 pv x 42 €", "84.00", "cost", None),
+        (trip_db_ids[4], "210", "KOTIMAAN AJO, KUORMATTU", "150.00", "cost", None),
+        (trip_db_ids[4], "500", "LAUTTA", "620.00", "cost", None),
+        (trip_db_ids[4], "510", "SATAMAMAKSU", "60.00", "cost", None),
+        (trip_db_ids[4], "220", "MANTEREEN AJO, KUORMATTU", "440.00", "cost", None),
         # Trip 6 — Vahvistettu FI→PL (2 orderia)
-        (trip_db_ids[5], "120", "FREIGHT", 3600.0, "revenue", None),
-        (trip_db_ids[5], "200", "POLTTOAINELISÄ", 684.0, "revenue", None),
-        (trip_db_ids[5], "400", "TRAILERVUOKRA (myynti) 5 pv x 59 €", 295.0, "revenue", None),
-        (trip_db_ids[5], "400", "TRAILERVUOKRA (osto) 5 pv x 38 €", 190.0, "cost", None),
-        (trip_db_ids[5], "210", "KOTIMAAN AJO, KUORMATTU", 330.0, "cost", None),
-        (trip_db_ids[5], "500", "LAUTTA", 620.0, "cost", None),
-        (trip_db_ids[5], "220", "MANTEREEN AJO, KUORMATTU", 2600.0, "cost", None),
-        (trip_db_ids[5], "350", "PUOLAN TIEMAKSU", 140.0, "cost", None),
+        (trip_db_ids[5], "120", "FREIGHT", "3600.00", "revenue", None),
+        (trip_db_ids[5], "200", "POLTTOAINELISÄ", "684.00", "revenue", None),
+        (trip_db_ids[5], "400", "TRAILERVUOKRA (myynti) 5 pv x 59 €", "295.00", "revenue", None),
+        (trip_db_ids[5], "400", "TRAILERVUOKRA (osto) 5 pv x 38 €", "190.00", "cost", None),
+        (trip_db_ids[5], "210", "KOTIMAAN AJO, KUORMATTU", "330.00", "cost", None),
+        (trip_db_ids[5], "500", "LAUTTA", "620.00", "cost", None),
+        (trip_db_ids[5], "220", "MANTEREEN AJO, KUORMATTU", "2600.00", "cost", None),
+        (trip_db_ids[5], "350", "PUOLAN TIEMAKSU", "140.00", "cost", None),
         # Trip 7 — Suunniteltu FI→NO
-        (trip_db_ids[6], "120", "FREIGHT", 2600.0, "revenue", None),
-        (trip_db_ids[6], "200", "POLTTOAINELISÄ", 494.0, "revenue", None),
-        (trip_db_ids[6], "210", "KOTIMAAN AJO, KUORMATTU", 160.0, "cost", None),
-        (trip_db_ids[6], "500", "LAUTTA", 690.0, "cost", None),
-        (trip_db_ids[6], "220", "MANTEREEN AJO, KUORMATTU", 1900.0, "cost", None),
+        (trip_db_ids[6], "120", "FREIGHT", "2600.00", "revenue", None),
+        (trip_db_ids[6], "200", "POLTTOAINELISÄ", "494.00", "revenue", None),
+        (trip_db_ids[6], "210", "KOTIMAAN AJO, KUORMATTU", "160.00", "cost", None),
+        (trip_db_ids[6], "500", "LAUTTA", "690.00", "cost", None),
+        (trip_db_ids[6], "220", "MANTEREEN AJO, KUORMATTU", "1900.00", "cost", None),
     ]
+    # Summat euroina (merkkijonoina, ei floatina) → sentit
     cursor.executemany(
-        "INSERT INTO costs (trip_id, cost_code, description, amount, cost_type, custom_description) "
+        "INSERT INTO costs (trip_id, cost_code, description, amount_cents, cost_type, custom_description) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        costs_demo,
+        [(trip, code, desc, money.to_cents(amount), ctype, custom)
+         for trip, code, desc, amount, ctype, custom in costs_demo],
     )
 
 
 def reset_db(db_path):
-    """Drop all base tables, recreate schema and insert demo data."""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    for table in ("costs", "orders", "trucks", "trips", "trailers", "carriers", "customers", "fuel_rates"):
-        cursor.execute(f"DROP TABLE IF EXISTS {table}")
-    conn.commit()
-    create_schema(conn)
-    seed_demo_data(conn)
-    conn.commit()
-    conn.close()
+    """Puhdas demokanta (sama kuin python reset_demo.py)."""
+    from reset_demo import reset_demo
+    reset_demo(db_path)
     print("Tietokanta alustettu onnistuneesti.")
 
 

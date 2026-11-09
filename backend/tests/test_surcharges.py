@@ -4,12 +4,13 @@ Määrittely: docs/pricing-engine-spec.md, luku 7. Kaikki hinnat ovat demodataa.
 """
 import sqlite3
 from datetime import date
+from decimal import Decimal
 
 import pytest
 
 from surcharges import (
     DEMO_SURCHARGE_RATES, SURCHARGE_COLUMNS, calculate_surcharge,
-    derive_trade_type, ensure_surcharge_rates, round_amount,
+    derive_trade_type, ensure_surcharge_rates, insert_rate, round_amount,
     run_surcharges_migration, select_rate, specificity,
 )
 
@@ -34,12 +35,7 @@ def add_rate(conn, **kw):
         "max_amount": None, "valid_from": "2026-01-01", "valid_to": None,
     }
     row.update(kw)
-    cur = conn.execute(
-        f"INSERT INTO surcharge_rates ({', '.join(SURCHARGE_COLUMNS)}) "
-        f"VALUES ({', '.join('?' * len(SURCHARGE_COLUMNS))})",
-        [row[c] for c in SURCHARGE_COLUMNS],
-    )
-    return cur.lastrowid
+    return insert_rate(conn, {c: row[c] for c in SURCHARGE_COLUMNS})
 
 
 def ctx(**kw):
@@ -72,7 +68,7 @@ def test_derive_trade_type_requires_both_countries(loading, unloading):
 def test_percent_is_calculated_from_freight(conn):
     add_rate(conn, service_code="230", rate_type="percent", rate=9)
     res = calculate_surcharge("230", ctx(freight_amount=2000), conn)
-    assert res["amount"] == 180.00
+    assert res["amount"] == Decimal("180.00")
     assert res["rate_type"] == "percent"
     assert res["base"] == 2000
     assert res["capped"] is None
@@ -81,20 +77,20 @@ def test_percent_is_calculated_from_freight(conn):
 def test_fixed_ignores_bases(conn):
     add_rate(conn, rate_type="fixed", rate=150)
     res = calculate_surcharge("530", ctx(freight_amount=99999, km=5000), conn)
-    assert res["amount"] == 150.00
+    assert res["amount"] == Decimal("150.00")
     assert res["base"] is None
 
 
 def test_per_100kg_uses_chargeable_weight(conn):
     add_rate(conn, service_code="540", rate_type="per_100kg", rate=0.40)
     res = calculate_surcharge("540", ctx(chargeable_weight=3250), conn)
-    assert res["amount"] == 13.00  # 3250 / 100 × 0,40
+    assert res["amount"] == Decimal("13.00")  # 3250 / 100 × 0,40
 
 
 def test_per_km(conn):
     add_rate(conn, service_code="300", cost_type="cost", rate_type="per_km", rate=0.20)
     res = calculate_surcharge("300", ctx(cost_type="cost", km=1234), conn)
-    assert res["amount"] == 246.80
+    assert res["amount"] == Decimal("246.80")
 
 
 @pytest.mark.parametrize("rate_type, missing", [
@@ -117,16 +113,16 @@ def test_missing_cost_type_or_date_raises(conn):
 
 
 def test_rounding_half_up():
-    assert round_amount(0.125) == 0.13
-    assert round_amount(2.675) == 2.68  # float-pyöristys antaisi 2.67
-    assert round_amount(1.005) == 1.01
+    assert round_amount(0.125) == Decimal("0.13")
+    assert round_amount(2.675) == Decimal("2.68")  # float-pyöristys antaisi 2.67
+    assert round_amount(1.005) == Decimal("1.01")
 
 
 def test_percent_rounding_half_up(conn):
     add_rate(conn, rate_type="percent", rate=2.5)
     # 100,50 × 2,5 % = 2,5125 → 2,51 ; 100,30 × 2,5 % = 2,5075 → 2,51
-    assert calculate_surcharge("530", ctx(freight_amount=100.5), conn)["amount"] == 2.51
-    assert calculate_surcharge("530", ctx(freight_amount=100.3), conn)["amount"] == 2.51
+    assert calculate_surcharge("530", ctx(freight_amount=100.5), conn)["amount"] == Decimal("2.51")
+    assert calculate_surcharge("530", ctx(freight_amount=100.3), conn)["amount"] == Decimal("2.51")
 
 
 # ── min / max ─────────────────────────────────────────────────────────
@@ -134,28 +130,28 @@ def test_percent_rounding_half_up(conn):
 def test_min_amount_applies(conn):
     add_rate(conn, rate_type="per_100kg", rate=0.40, min_amount=5)
     res = calculate_surcharge("530", ctx(chargeable_weight=500), conn)  # 2,00
-    assert res["amount"] == 5.00
+    assert res["amount"] == Decimal("5.00")
     assert res["capped"] == "min"
 
 
 def test_max_amount_applies(conn):
     add_rate(conn, rate_type="percent", rate=10, max_amount=150)
     res = calculate_surcharge("530", ctx(freight_amount=2000), conn)  # 200
-    assert res["amount"] == 150.00
+    assert res["amount"] == Decimal("150.00")
     assert res["capped"] == "max"
 
 
 def test_amount_between_min_and_max_unchanged(conn):
     add_rate(conn, rate_type="percent", rate=10, min_amount=50, max_amount=300)
     res = calculate_surcharge("530", ctx(freight_amount=2000), conn)
-    assert res["amount"] == 200.00
+    assert res["amount"] == Decimal("200.00")
     assert res["capped"] is None
 
 
 def test_min_equal_boundary_not_capped(conn):
     add_rate(conn, rate_type="fixed", rate=50, min_amount=50, max_amount=50)
     res = calculate_surcharge("530", ctx(), conn)
-    assert res["amount"] == 50.00
+    assert res["amount"] == Decimal("50.00")
     assert res["capped"] is None
 
 
@@ -172,7 +168,7 @@ def test_most_specific_wins(conn):
     res = calculate_surcharge(
         "530", ctx(trade_type="EXP", product_type="FTL", country="BE"), conn)
     assert res["rate_id"] == best
-    assert res["amount"] == 30.00
+    assert res["amount"] == Decimal("30.00")
 
 
 def test_direction_plus_country_beats_direction(conn):
@@ -180,7 +176,7 @@ def test_direction_plus_country_beats_direction(conn):
     add_rate(conn, trade_type="EXP", country="BE", rate=20)
     res = calculate_surcharge(
         "530", ctx(trade_type="EXP", product_type="LTL", country="BE"), conn)
-    assert res["amount"] == 20.00
+    assert res["amount"] == Decimal("20.00")
 
 
 def test_country_beats_product(conn):
@@ -188,14 +184,14 @@ def test_country_beats_product(conn):
     add_rate(conn, trade_type="EXP", country="BE", rate=20)
     res = calculate_surcharge(
         "530", ctx(trade_type="EXP", product_type="FTL", country="BE"), conn)
-    assert res["amount"] == 20.00
+    assert res["amount"] == Decimal("20.00")
 
 
 def test_falls_back_to_direction_for_other_country(conn):
     add_rate(conn, trade_type="EXP", rate=10)
     add_rate(conn, trade_type="EXP", country="BE", rate=20)
     res = calculate_surcharge("530", ctx(trade_type="EXP", country="DE"), conn)
-    assert res["amount"] == 10.00
+    assert res["amount"] == Decimal("10.00")
 
 
 def test_non_matching_targeting_excluded(conn):
@@ -326,41 +322,41 @@ def test_demo_spec_example_fi_be_ftl(demo):
     """Luku 16: FI → BE FTL, rahti 2 000 €."""
     sale = ctx(trade_type=derive_trade_type("FI", "BE"), product_type="FTL",
                country="BE", freight_amount=2000, chargeable_weight=22000)
-    assert calculate_surcharge("230", sale, demo)["amount"] == 180.00
-    assert calculate_surcharge("530", sale, demo)["amount"] == 150.00
+    assert calculate_surcharge("230", sale, demo)["amount"] == Decimal("180.00")
+    assert calculate_surcharge("530", sale, demo)["amount"] == Decimal("150.00")
     cost = ctx(cost_type="cost", operator="Demo Ferries", product_type="FTL")
-    assert calculate_surcharge("530", cost, demo)["amount"] == 180.00
-    assert calculate_surcharge("520", cost, demo)["amount"] == 300.00
+    assert calculate_surcharge("530", cost, demo)["amount"] == Decimal("180.00")
+    assert calculate_surcharge("520", cost, demo)["amount"] == Decimal("300.00")
 
 
 def test_demo_mobility_package_import(demo):
     res = calculate_surcharge(
         "230", ctx(trade_type=derive_trade_type("DE", "FI"), country="DE",
                    freight_amount=1000), demo)
-    assert res["amount"] == 80.00
+    assert res["amount"] == Decimal("80.00")
     # CROSS-liikenteelle ei ole liikkuvuuspakettihintaa
     assert calculate_surcharge(
         "230", ctx(trade_type="CROSS", country="DE", freight_amount=1000), demo) is None
 
 
 def test_demo_marpol_ftl_and_ltl(demo):
-    assert calculate_surcharge("540", ctx(product_type="FTL"), demo)["amount"] == 45.00
+    assert calculate_surcharge("540", ctx(product_type="FTL"), demo)["amount"] == Decimal("45.00")
     ltl = calculate_surcharge("540", ctx(product_type="LTL", chargeable_weight=4000), demo)
-    assert ltl["amount"] == 16.00
+    assert ltl["amount"] == Decimal("16.00")
     small = calculate_surcharge("540", ctx(product_type="LTL", chargeable_weight=300), demo)
-    assert small["amount"] == 5.00 and small["capped"] == "min"
+    assert small["amount"] == Decimal("5.00") and small["capped"] == "min"
 
 
 def test_demo_baf_ltl_min(demo):
     res = calculate_surcharge(
         "520", ctx(cost_type="cost", operator="Demo Ferries", product_type="LTL",
                    chargeable_weight=1000), demo)
-    assert res["amount"] == 15.00 and res["capped"] == "min"
+    assert res["amount"] == Decimal("15.00") and res["capped"] == "min"
 
 
 def test_demo_ets_price_by_date(demo):
-    assert calculate_surcharge("530", ctx(date="2025-11-01"), demo)["amount"] == 120.00
-    assert calculate_surcharge("530", ctx(date="2026-02-01"), demo)["amount"] == 150.00
+    assert calculate_surcharge("530", ctx(date="2025-11-01"), demo)["amount"] == Decimal("120.00")
+    assert calculate_surcharge("530", ctx(date="2026-02-01"), demo)["amount"] == Decimal("150.00")
 
 
 # ── API (CRUD) ────────────────────────────────────────────────────────
@@ -511,4 +507,4 @@ def test_api_created_rate_used_in_calculation(client):
                     "operator": "Baltic Demo Line"}, conn)
     finally:
         conn.close()
-    assert res["amount"] == 175.00
+    assert res["amount"] == Decimal("175.00")

@@ -7,6 +7,7 @@ import pytest
 from customer_pricing import (
     find_rate_card, get_billing_rule, seed_customer_pricing,
     ensure_customer_pricing_tables, normalize_zip,
+    insert_billing_rule, insert_rate_card,
     DEMO_PRICING_CUSTOMERS, DEMO_RATE_CARDS, DEMO_BILLING_RULES,
 )
 
@@ -31,25 +32,24 @@ def _new_customer(conn, name="Testi Demo Oy"):
 
 def _card(conn, cid, origin, dest, price, product="FTL",
           o_zip=None, d_zip=None, valid_from="2026-01-01", valid_to=None):
-    cur = conn.execute(
-        "INSERT INTO customer_rate_cards (customer_id, origin_country, "
-        "origin_zip_prefix, dest_country, dest_zip_prefix, product_type, "
-        "freight_price, valid_from, valid_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (cid, origin, o_zip, dest, d_zip, product, price, valid_from, valid_to),
-    )
+    rid = insert_rate_card(conn, {
+        "customer_id": cid, "origin_country": origin, "origin_zip_prefix": o_zip,
+        "dest_country": dest, "dest_zip_prefix": d_zip, "product_type": product,
+        "freight_price": price, "valid_from": valid_from, "valid_to": valid_to,
+    })
     conn.commit()
-    return cur.lastrowid
+    return rid
 
 
 def _rule(conn, cid, code, billed=1, rate_type=None, rate=None,
           valid_from="2026-01-01", valid_to=None):
-    cur = conn.execute(
-        "INSERT INTO customer_billing_rules (customer_id, service_code, billed, "
-        "rate_type, rate, valid_from, valid_to) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (cid, code, billed, rate_type, rate, valid_from, valid_to),
-    )
+    rid = insert_billing_rule(conn, {
+        "customer_id": cid, "service_code": code, "billed": billed,
+        "rate_type": rate_type, "rate": rate,
+        "valid_from": valid_from, "valid_to": valid_to,
+    })
     conn.commit()
-    return cur.lastrowid
+    return rid
 
 
 @pytest.fixture

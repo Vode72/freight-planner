@@ -74,13 +74,14 @@ def test_every_trip_matches_costs_table(demo):
     for t in data["trips"]:
         row = conn.execute("""
             SELECT
-              COALESCE(SUM(CASE WHEN cost_type='revenue' THEN amount END), 0),
-              COALESCE(SUM(CASE WHEN cost_type='cost' THEN amount END), 0)
+              COALESCE(SUM(CASE WHEN cost_type='revenue' THEN amount_cents END), 0),
+              COALESCE(SUM(CASE WHEN cost_type='cost' THEN amount_cents END), 0)
             FROM costs WHERE trip_id = ?
         """, (t["id"],)).fetchone()
-        assert t["total_revenue"] == round(row[0], 2), t["trip_id"]
-        assert t["total_costs"] == round(row[1], 2), t["trip_id"]
-        assert t["margin"] == round(row[0] - row[1], 2), t["trip_id"]
+        # Kanta sentteinä (kokonaisluvut), API euroina
+        assert t["total_revenue"] == row[0] / 100, t["trip_id"]
+        assert t["total_costs"] == row[1] / 100, t["trip_id"]
+        assert t["margin"] == (row[0] - row[1]) / 100, t["trip_id"]
         assert t["order_count"] == conn.execute(
             "SELECT COUNT(*) FROM orders WHERE trip_id = ?", (t["id"],)
         ).fetchone()[0], t["trip_id"]
@@ -111,12 +112,12 @@ def test_kpi_matches_costs_table(demo):
 
     row = conn.execute("""
         SELECT
-          SUM(CASE WHEN co.cost_type='revenue' THEN co.amount ELSE 0 END),
-          SUM(CASE WHEN co.cost_type='cost' THEN co.amount ELSE 0 END)
+          SUM(CASE WHEN co.cost_type='revenue' THEN co.amount_cents ELSE 0 END),
+          SUM(CASE WHEN co.cost_type='cost' THEN co.amount_cents ELSE 0 END)
         FROM costs co JOIN trips t ON co.trip_id = t.id
     """).fetchone()
-    assert kpi["total_revenue"] == round(row[0], 2)
-    assert kpi["total_costs"] == round(row[1], 2)
+    assert kpi["total_revenue"] == row[0] / 100
+    assert kpi["total_costs"] == row[1] / 100
 
 
 def test_kpi_matches_costs_dashboard(demo):

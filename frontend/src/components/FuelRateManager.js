@@ -90,7 +90,8 @@ function FuelRateManager() {
       const res = await fetch(url, {
         method: editId ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, multiplier: mult })
+        // Kerroin merkkijonona: backend jäsentää sen Decimaliksi (ei floatia)
+        body: JSON.stringify({ ...form, multiplier: String(form.multiplier).trim() })
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error || "Tallennus epäonnistui"); return; }

@@ -148,7 +148,7 @@ def test_reset_demo_is_clean_and_repeatable(tmp_path):
 
     conn = sqlite3.connect(target)
     conn.execute("INSERT INTO customers (name, country) VALUES ('Ylimääräinen Demo Oy', 'FI')")
-    conn.execute("INSERT INTO surcharge_rates (service_code, cost_type, rate_type, rate, valid_from) "
+    conn.execute("INSERT INTO surcharge_rates (service_code, cost_type, rate_type, rate_e4, valid_from) "
                  "VALUES ('600', 'cost', 'fixed', 1, '2026-01-01')")
     conn.commit()
     conn.close()

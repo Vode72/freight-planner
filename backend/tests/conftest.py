@@ -14,30 +14,19 @@ os.environ["FREIGHT_DB_PATH"] = os.path.join(_SESSION_TMP, "unused.db")
 from db_config import DEFAULT_DB_PATH  # noqa: E402
 
 import app as flask_app  # noqa: E402
-from init_db import create_schema, seed_demo_data
-from migrate_restrictions import run_migration as run_restrictions
-from migrate_hallinta import run_migration as run_hallinta
-from migrate_settings import run_migration as run_settings
-from migrate_services import run_migration as run_services
-from migrate_surcharges import run_migration as run_surcharges
-from migrate_customer_pricing import run_migration as run_customer_pricing
+from init_db import create_schema, seed_demo_data, seed_reference_demo  # noqa: E402
 
 
 def _build_test_db(db_path, with_seed=False):
-    """Create schema (+ optionally seed demo data) and run all migrations."""
+    """Skeema Alembic-migraatioilla + viitedemodata (+ halutessa koko demodata)."""
     conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
     create_schema(conn)
     if with_seed:
         seed_demo_data(conn)
+    else:
+        seed_reference_demo(conn)
     conn.commit()
     conn.close()
-    run_restrictions(db_path)
-    run_hallinta(db_path)
-    run_settings(db_path)
-    run_services(db_path)
-    run_surcharges(db_path)
-    run_customer_pricing(db_path)
 
 
 @pytest.fixture

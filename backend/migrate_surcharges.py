@@ -1,19 +1,14 @@
-import sqlite3
+"""Yhteensopivuuskääre: ajaa Alembic-migraatiot (alembic upgrade head).
 
-from surcharges import (
-    ensure_surcharge_rates, seed_surcharge_rates, migrate_fuel_rates,
-)
+Skeema ja viitedata ovat migrations/versions-revisioissa, demodata
+init_db.seed_demo_data():ssa (python reset_demo.py).
+"""
+from db_migrate import upgrade_db
 
 
 def run_migration(db_path):
-    conn = sqlite3.connect(db_path)
-    ensure_surcharge_rates(conn)
-    seeded = seed_surcharge_rates(conn)
-    fuel = migrate_fuel_rates(conn)
-    conn.commit()
-    conn.close()
-    print(f"migrate_surcharges.py valmis — surcharge_rates, {seeded} demoriviä lisätty, "
-          f"{fuel} polttoainekerrointa siirretty fuel_rates-taulusta.")
+    upgrade_db(db_path)
+    print(f"{__name__}: alembic upgrade head valmis ({db_path}).")
 
 
 if __name__ == "__main__":
