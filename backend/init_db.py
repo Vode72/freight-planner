@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import date, timedelta
 
+import money
 from db_migrate import upgrade_connection
 
 
@@ -162,8 +163,9 @@ def _seed_hallinta_demo(cursor):
 
     cursor.execute("DELETE FROM km_rates")
     cursor.execute(
-        "INSERT INTO km_rates (valid_from, valid_to, domestic_rate, continent_rate, notes) "
-        "VALUES ('2026-01-01', NULL, 1.85, 2.20, 'Perushinnoittelu 2026')"
+        "INSERT INTO km_rates (valid_from, valid_to, domestic_rate_e4, continent_rate_e4, notes) "
+        "VALUES ('2026-01-01', NULL, ?, ?, 'Perushinnoittelu 2026')",
+        (money.to_e4("1.85"), money.to_e4("2.20")),
     )
 
     cursor.execute("DELETE FROM ferry_rates")
@@ -174,8 +176,8 @@ def _seed_hallinta_demo(cursor):
         ("Kotka - Antwerpen",     1800, "2026-01-01", None),
     ]
     cursor.executemany(
-        "INSERT INTO ferry_rates (route, price, valid_from, valid_to) VALUES (?,?,?,?)",
-        ferry_routes,
+        "INSERT INTO ferry_rates (route, price_cents, valid_from, valid_to) VALUES (?,?,?,?)",
+        [(route, money.to_cents(price), vf, vt) for route, price, vf, vt in ferry_routes],
     )
 
 
@@ -197,10 +199,12 @@ def seed_base_demo(conn):
         ("HRV-001", "CM-4101", "Megatrailer", 38, 59),
         ("HRV-002", "CM-4102", "Megatrailer", 38, 59),
     ]
+    # leasing_rate / rental_rate €/pv → sentteinä
     cursor.executemany(
-        "INSERT INTO trailers (plate_number, identifier, trailer_type, leasing_rate, rental_rate) "
-        "VALUES (?, ?, ?, ?, ?)",
-        trailers,
+        "INSERT INTO trailers (plate_number, identifier, trailer_type, "
+        "leasing_rate_cents, rental_rate_cents) VALUES (?, ?, ?, ?, ?)",
+        [(plate, ident, ttype, money.to_cents(leasing), money.to_cents(rental))
+         for plate, ident, ttype, leasing, rental in trailers],
     )
 
     carriers = [
@@ -426,65 +430,67 @@ def seed_base_demo(conn):
     # ja muut lisät sisältyvät spot-hintaan, joten 400 on vain kulurivinä.
     costs_demo = [
         # Trip 1 — Suunniteltu FI→DE (2 orderia)
-        (trip_db_ids[0], "120", "FREIGHT", 3400.0, "revenue", None),
-        (trip_db_ids[0], "200", "POLTTOAINELISÄ", 646.0, "revenue", None),
-        (trip_db_ids[0], "210", "KOTIMAAN AJO, KUORMATTU", 180.0, "cost", None),
-        (trip_db_ids[0], "500", "LAUTTA", 1050.0, "cost", None),
-        (trip_db_ids[0], "220", "MANTEREEN AJO, KUORMATTU", 1950.0, "cost", None),
-        (trip_db_ids[0], "300", "SAKSAN TIEMAKSU", 120.0, "cost", None),
+        (trip_db_ids[0], "120", "FREIGHT", "3400.00", "revenue", None),
+        (trip_db_ids[0], "200", "POLTTOAINELISÄ", "646.00", "revenue", None),
+        (trip_db_ids[0], "210", "KOTIMAAN AJO, KUORMATTU", "180.00", "cost", None),
+        (trip_db_ids[0], "500", "LAUTTA", "1050.00", "cost", None),
+        (trip_db_ids[0], "220", "MANTEREEN AJO, KUORMATTU", "1950.00", "cost", None),
+        (trip_db_ids[0], "300", "SAKSAN TIEMAKSU", "120.00", "cost", None),
         # Trip 2 — Vahvistettu FI→SE lautta
-        (trip_db_ids[1], "120", "FREIGHT", 1450.0, "revenue", None),
-        (trip_db_ids[1], "200", "POLTTOAINELISÄ", 275.5, "revenue", None),
-        (trip_db_ids[1], "400", "TRAILERVUOKRA (myynti) 2 pv x 70 €", 140.0, "revenue", None),
-        (trip_db_ids[1], "400", "TRAILERVUOKRA (osto) 2 pv x 45 €", 90.0, "cost", None),
-        (trip_db_ids[1], "210", "KOTIMAAN AJO, KUORMATTU", 120.0, "cost", None),
-        (trip_db_ids[1], "500", "LAUTTA", 680.0, "cost", None),
-        (trip_db_ids[1], "220", "MANTEREEN AJO, KUORMATTU", 650.0, "cost", None),
+        (trip_db_ids[1], "120", "FREIGHT", "1450.00", "revenue", None),
+        (trip_db_ids[1], "200", "POLTTOAINELISÄ", "275.50", "revenue", None),
+        (trip_db_ids[1], "400", "TRAILERVUOKRA (myynti) 2 pv x 70 €", "140.00", "revenue", None),
+        (trip_db_ids[1], "400", "TRAILERVUOKRA (osto) 2 pv x 45 €", "90.00", "cost", None),
+        (trip_db_ids[1], "210", "KOTIMAAN AJO, KUORMATTU", "120.00", "cost", None),
+        (trip_db_ids[1], "500", "LAUTTA", "680.00", "cost", None),
+        (trip_db_ids[1], "220", "MANTEREEN AJO, KUORMATTU", "650.00", "cost", None),
         # Trip 3 — Käynnissä FI→NL (3 orderia)
-        (trip_db_ids[2], "120", "FREIGHT", 4300.0, "revenue", None),
-        (trip_db_ids[2], "200", "POLTTOAINELISÄ", 817.0, "revenue", None),
-        (trip_db_ids[2], "400", "TRAILERVUOKRA (myynti) 5 pv x 54 €", 270.0, "revenue", None),
-        (trip_db_ids[2], "400", "TRAILERVUOKRA (osto) 5 pv x 35 €", 175.0, "cost", None),
-        (trip_db_ids[2], "210", "KOTIMAAN AJO, KUORMATTU", 160.0, "cost", None),
-        (trip_db_ids[2], "500", "LAUTTA", 1050.0, "cost", None),
-        (trip_db_ids[2], "220", "MANTEREEN AJO, KUORMATTU", 2800.0, "cost", None),
-        (trip_db_ids[2], "310", "HOLLANTI + SAKSA TIEMAKSU", 260.0, "cost", None),
+        (trip_db_ids[2], "120", "FREIGHT", "4300.00", "revenue", None),
+        (trip_db_ids[2], "200", "POLTTOAINELISÄ", "817.00", "revenue", None),
+        (trip_db_ids[2], "400", "TRAILERVUOKRA (myynti) 5 pv x 54 €", "270.00", "revenue", None),
+        (trip_db_ids[2], "400", "TRAILERVUOKRA (osto) 5 pv x 35 €", "175.00", "cost", None),
+        (trip_db_ids[2], "210", "KOTIMAAN AJO, KUORMATTU", "160.00", "cost", None),
+        (trip_db_ids[2], "500", "LAUTTA", "1050.00", "cost", None),
+        (trip_db_ids[2], "220", "MANTEREEN AJO, KUORMATTU", "2800.00", "cost", None),
+        (trip_db_ids[2], "310", "HOLLANTI + SAKSA TIEMAKSU", "260.00", "cost", None),
         # Trip 4 — Toimitettu FI→DE (2 orderia)
-        (trip_db_ids[3], "120", "FREIGHT", 4100.0, "revenue", None),
-        (trip_db_ids[3], "200", "POLTTOAINELISÄ", 779.0, "revenue", None),
-        (trip_db_ids[3], "400", "TRAILERVUOKRA (myynti) 4 pv x 67 €", 268.0, "revenue", None),
-        (trip_db_ids[3], "400", "TRAILERVUOKRA (osto) 4 pv x 43 €", 172.0, "cost", None),
-        (trip_db_ids[3], "210", "KOTIMAAN AJO, KUORMATTU", 720.0, "cost", None),
-        (trip_db_ids[3], "500", "LAUTTA", 1050.0, "cost", None),
-        (trip_db_ids[3], "220", "MANTEREEN AJO, KUORMATTU", 2350.0, "cost", None),
-        (trip_db_ids[3], "300", "SAKSAN TIEMAKSU", 190.0, "cost", None),
+        (trip_db_ids[3], "120", "FREIGHT", "4100.00", "revenue", None),
+        (trip_db_ids[3], "200", "POLTTOAINELISÄ", "779.00", "revenue", None),
+        (trip_db_ids[3], "400", "TRAILERVUOKRA (myynti) 4 pv x 67 €", "268.00", "revenue", None),
+        (trip_db_ids[3], "400", "TRAILERVUOKRA (osto) 4 pv x 43 €", "172.00", "cost", None),
+        (trip_db_ids[3], "210", "KOTIMAAN AJO, KUORMATTU", "720.00", "cost", None),
+        (trip_db_ids[3], "500", "LAUTTA", "1050.00", "cost", None),
+        (trip_db_ids[3], "220", "MANTEREEN AJO, KUORMATTU", "2350.00", "cost", None),
+        (trip_db_ids[3], "300", "SAKSAN TIEMAKSU", "190.00", "cost", None),
         # Trip 5 — Laskutettu FI→EE, spot
-        (trip_db_ids[4], "100", "SPOT", 1650.0, "revenue", None),
-        (trip_db_ids[4], "400", "TRAILERVUOKRA (osto) 2 pv x 42 €", 84.0, "cost", None),
-        (trip_db_ids[4], "210", "KOTIMAAN AJO, KUORMATTU", 150.0, "cost", None),
-        (trip_db_ids[4], "500", "LAUTTA", 620.0, "cost", None),
-        (trip_db_ids[4], "510", "SATAMAMAKSU", 60.0, "cost", None),
-        (trip_db_ids[4], "220", "MANTEREEN AJO, KUORMATTU", 440.0, "cost", None),
+        (trip_db_ids[4], "100", "SPOT", "1650.00", "revenue", None),
+        (trip_db_ids[4], "400", "TRAILERVUOKRA (osto) 2 pv x 42 €", "84.00", "cost", None),
+        (trip_db_ids[4], "210", "KOTIMAAN AJO, KUORMATTU", "150.00", "cost", None),
+        (trip_db_ids[4], "500", "LAUTTA", "620.00", "cost", None),
+        (trip_db_ids[4], "510", "SATAMAMAKSU", "60.00", "cost", None),
+        (trip_db_ids[4], "220", "MANTEREEN AJO, KUORMATTU", "440.00", "cost", None),
         # Trip 6 — Vahvistettu FI→PL (2 orderia)
-        (trip_db_ids[5], "120", "FREIGHT", 3600.0, "revenue", None),
-        (trip_db_ids[5], "200", "POLTTOAINELISÄ", 684.0, "revenue", None),
-        (trip_db_ids[5], "400", "TRAILERVUOKRA (myynti) 5 pv x 59 €", 295.0, "revenue", None),
-        (trip_db_ids[5], "400", "TRAILERVUOKRA (osto) 5 pv x 38 €", 190.0, "cost", None),
-        (trip_db_ids[5], "210", "KOTIMAAN AJO, KUORMATTU", 330.0, "cost", None),
-        (trip_db_ids[5], "500", "LAUTTA", 620.0, "cost", None),
-        (trip_db_ids[5], "220", "MANTEREEN AJO, KUORMATTU", 2600.0, "cost", None),
-        (trip_db_ids[5], "350", "PUOLAN TIEMAKSU", 140.0, "cost", None),
+        (trip_db_ids[5], "120", "FREIGHT", "3600.00", "revenue", None),
+        (trip_db_ids[5], "200", "POLTTOAINELISÄ", "684.00", "revenue", None),
+        (trip_db_ids[5], "400", "TRAILERVUOKRA (myynti) 5 pv x 59 €", "295.00", "revenue", None),
+        (trip_db_ids[5], "400", "TRAILERVUOKRA (osto) 5 pv x 38 €", "190.00", "cost", None),
+        (trip_db_ids[5], "210", "KOTIMAAN AJO, KUORMATTU", "330.00", "cost", None),
+        (trip_db_ids[5], "500", "LAUTTA", "620.00", "cost", None),
+        (trip_db_ids[5], "220", "MANTEREEN AJO, KUORMATTU", "2600.00", "cost", None),
+        (trip_db_ids[5], "350", "PUOLAN TIEMAKSU", "140.00", "cost", None),
         # Trip 7 — Suunniteltu FI→NO
-        (trip_db_ids[6], "120", "FREIGHT", 2600.0, "revenue", None),
-        (trip_db_ids[6], "200", "POLTTOAINELISÄ", 494.0, "revenue", None),
-        (trip_db_ids[6], "210", "KOTIMAAN AJO, KUORMATTU", 160.0, "cost", None),
-        (trip_db_ids[6], "500", "LAUTTA", 690.0, "cost", None),
-        (trip_db_ids[6], "220", "MANTEREEN AJO, KUORMATTU", 1900.0, "cost", None),
+        (trip_db_ids[6], "120", "FREIGHT", "2600.00", "revenue", None),
+        (trip_db_ids[6], "200", "POLTTOAINELISÄ", "494.00", "revenue", None),
+        (trip_db_ids[6], "210", "KOTIMAAN AJO, KUORMATTU", "160.00", "cost", None),
+        (trip_db_ids[6], "500", "LAUTTA", "690.00", "cost", None),
+        (trip_db_ids[6], "220", "MANTEREEN AJO, KUORMATTU", "1900.00", "cost", None),
     ]
+    # Summat euroina (merkkijonoina, ei floatina) → sentit
     cursor.executemany(
-        "INSERT INTO costs (trip_id, cost_code, description, amount, cost_type, custom_description) "
+        "INSERT INTO costs (trip_id, cost_code, description, amount_cents, cost_type, custom_description) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        costs_demo,
+        [(trip, code, desc, money.to_cents(amount), ctype, custom)
+         for trip, code, desc, amount, ctype, custom in costs_demo],
     )
 
 

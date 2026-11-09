@@ -43,12 +43,56 @@ def _data(conn):
             for t in sorted(_tables(conn) - {"alembic_version"})}
 
 
-def _pre_alembic_db(path, revision):
-    """Kanta sellaisena kuin vanhat skriptit sen jättivät: skeema + demodata,
-    ei alembic_version-taulua."""
+# Vanhan (REAL) skeeman rivejä: hankalia liukulukuja tarkoituksella
+LEGACY_ROWS = {
+    "trips": [("INSERT INTO trips (id, trip_id, status) VALUES (1, 'TRP-OLD-1', 'Toimitettu')", ())],
+    "trailers": [(
+        "INSERT INTO trailers (id, plate_number, identifier, trailer_type, leasing_rate, rental_rate) "
+        "VALUES (3, 'OLD-001', 'O-1', 'Pressutrailer', ?, ?)", (35.5, 54.0))],
+    "costs": [
+        ("INSERT INTO costs (id, trip_id, cost_code, description, amount, cost_type) "
+         "VALUES (?, 1, '120', 'FREIGHT', ?, 'revenue')", (5, 0.1 + 0.2)),
+        ("INSERT INTO costs (id, trip_id, cost_code, description, amount, cost_type) "
+         "VALUES (?, 1, '200', 'POLTTOAINELISÄ', ?, 'revenue')", (6, 2.675)),
+        ("INSERT INTO costs (id, trip_id, cost_code, description, amount, cost_type) "
+         "VALUES (?, 1, '500', 'LAUTTA', ?, 'cost')", (9, 1.005)),
+        ("INSERT INTO costs (id, trip_id, cost_code, description, amount, cost_type) "
+         "VALUES (?, 1, '799', 'MUU', ?, 'cost')", (10, 275.5)),
+    ],
+    "km_rates": [(
+        "INSERT INTO km_rates (valid_from, domestic_rate, continent_rate) VALUES ('2026-01-01', ?, ?)",
+        (1.85, 2.2))],
+    "ferry_rates": [(
+        "INSERT INTO ferry_rates (route, price, valid_from) VALUES ('Demo A - Demo B', ?, '2026-01-01')",
+        (1050,))],
+    "surcharge_rates": [(
+        "INSERT INTO surcharge_rates (service_code, cost_type, rate_type, rate, min_amount, "
+        "max_amount, valid_from) VALUES ('520', 'cost', 'per_100kg', ?, ?, NULL, '2026-01-01')",
+        (0.6, 15)), (
+        "INSERT INTO surcharge_rates (service_code, cost_type, rate_type, rate, valid_from) "
+        "VALUES ('200', 'revenue', 'percent', ?, '2026-01-01')", (12.345,))],
+    "customers": [("INSERT INTO customers (id, name) VALUES (7, 'Vanha Demo Oy')", ())],
+    "customer_rate_cards": [(
+        "INSERT INTO customer_rate_cards (customer_id, origin_country, dest_country, product_type, "
+        "freight_price, valid_from) VALUES (7, 'FI', 'BE', 'FTL', ?, '2026-01-01')", (1999.99,))],
+    "customer_billing_rules": [
+        ("INSERT INTO customer_billing_rules (customer_id, service_code, billed, rate_type, rate, "
+         "valid_from) VALUES (7, '510', 1, 'pass_through', ?, '2026-01-01')", (5,)),
+        ("INSERT INTO customer_billing_rules (customer_id, service_code, billed, rate_type, rate, "
+         "valid_from) VALUES (7, '230', 0, NULL, NULL, '2026-01-01')", ()),
+    ],
+}
+
+
+def _pre_alembic_db(path):
+    """Kanta sellaisena kuin vanhat skriptit sen jättivät: REAL-rahasarakkeet
+    ja dataa, ei alembic_version-taulua."""
     conn = sqlite3.connect(path)
-    upgrade_connection(conn, revision)
-    seed_demo_data(conn)
+    upgrade_connection(conn, "0002")
+    for rows in LEGACY_ROWS.values():
+        for sql, params in rows:
+            conn.execute(sql, params)
+    conn.execute("DELETE FROM costs WHERE id = 9")  # AUTOINCREMENT-laskuri jää 10:een
     conn.execute("DROP TABLE alembic_version")
     conn.commit()
     return conn
@@ -86,7 +130,7 @@ def test_upgrade_is_idempotent(tmp_path):
 
 def test_baseline_keeps_existing_data(tmp_path):
     """Olemassa oleva (Alembicia edeltävä) kanta: baseline ei muuta dataa."""
-    conn = _pre_alembic_db(str(tmp_path / "legacy.db"), "0002")
+    conn = _pre_alembic_db(str(tmp_path / "legacy.db"))
     before = _schema(conn), _data(conn)
     upgrade_connection(conn, "0002")
     assert current_revision(conn) == "0002"
@@ -185,4 +229,119 @@ def test_alembic_cli_upgrade(tmp_path):
                    check=True, capture_output=True)
     conn = sqlite3.connect(env_target)
     assert current_revision(conn) == HEAD
+    conn.close()
+
+
+# ── 0003: rahakentät kokonaisluvuiksi ─────────────────────────────────
+
+MONEY_COLUMNS = {
+    "costs": {"amount_cents"},
+    "trailers": {"leasing_rate_cents", "rental_rate_cents"},
+    "ferry_rates": {"price_cents"},
+    "km_rates": {"domestic_rate_e4", "continent_rate_e4"},
+    "surcharge_rates": {"rate_e4", "min_amount_cents", "max_amount_cents"},
+    "customer_rate_cards": {"freight_price_cents"},
+    "customer_billing_rules": {"rate_e4"},
+}
+OLD_MONEY_COLUMNS = {"amount", "leasing_rate", "rental_rate", "price", "domestic_rate",
+                     "continent_rate", "rate", "min_amount", "max_amount", "freight_price"}
+
+
+def _types(conn, table):
+    return {r[1]: r[2] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def test_money_columns_are_integer(tmp_path):
+    path = str(tmp_path / "head.db")
+    upgrade_db(path)
+    conn = sqlite3.connect(path)
+    for table, cols in MONEY_COLUMNS.items():
+        types = _types(conn, table)
+        assert {c: types[c] for c in cols} == {c: "INTEGER" for c in cols}, table
+        assert not OLD_MONEY_COLUMNS & set(types), table
+    conn.close()
+
+
+def test_money_migration_converts_legacy_values(tmp_path):
+    conn = _pre_alembic_db(str(tmp_path / "legacy.db"))
+    upgrade_connection(conn)
+    assert current_revision(conn) == HEAD
+    assert conn.execute("SELECT id, amount_cents FROM costs ORDER BY id").fetchall() == [
+        (5, 30),      # 0.1 + 0.2 = 0.30000000000000004 → 0,30 €
+        (6, 268),     # 2.675 (float 2.67499999…) → 2,68 € (ROUND_HALF_UP desimaalina)
+        (10, 27550),  # 275.5 → 275,50 €
+    ]
+    assert conn.execute(
+        "SELECT leasing_rate_cents, rental_rate_cents FROM trailers").fetchone() == (3550, 5400)
+    assert conn.execute(
+        "SELECT domestic_rate_e4, continent_rate_e4 FROM km_rates").fetchone() == (18500, 22000)
+    assert conn.execute("SELECT price_cents FROM ferry_rates").fetchone() == (105000,)
+    assert conn.execute(
+        "SELECT rate_type, rate_e4, min_amount_cents, max_amount_cents FROM surcharge_rates "
+        "ORDER BY id").fetchall() == [("per_100kg", 6000, 1500, None), ("percent", 123450, None, None)]
+    assert conn.execute(
+        "SELECT freight_price_cents FROM customer_rate_cards").fetchone() == (199999,)
+    assert conn.execute(
+        "SELECT service_code, rate_e4 FROM customer_billing_rules ORDER BY id").fetchall() == [
+        ("510", 50000), ("230", None)]
+    # Kaikki rahat tallessa kokonaislukuina
+    for table, cols in MONEY_COLUMNS.items():
+        for col in cols:
+            kinds = {r[0] for r in conn.execute(f"SELECT DISTINCT typeof({col}) FROM {table}")}
+            assert kinds <= {"integer", "null"}, (table, col, kinds)
+    conn.close()
+
+
+def test_money_migration_keeps_ids_indexes_and_sequence(tmp_path):
+    conn = _pre_alembic_db(str(tmp_path / "legacy.db"))
+    upgrade_connection(conn)
+    # Poistetun rivin id:tä (9) ei käytetä uudelleen eikä mitään ennen 10:tä
+    new_id = conn.execute(
+        "INSERT INTO costs (trip_id, cost_code, description, amount_cents) "
+        "VALUES (1, '799', 'UUSI', 100)").lastrowid
+    assert new_id == 11
+    indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    assert {"idx_surcharge_rates_lookup", "idx_customer_rate_cards_lookup",
+            "idx_customer_billing_rules_lookup"} <= indexes
+    conn.close()
+
+
+def test_money_migration_downgrade_and_upgrade_again(tmp_path):
+    from db_migrate import downgrade_connection
+    conn = _pre_alembic_db(str(tmp_path / "legacy.db"))
+    upgrade_connection(conn)
+    after_upgrade = _schema(conn), _data(conn)
+    downgrade_connection(conn, "0002")
+    assert current_revision(conn) == "0002"
+    assert _types(conn, "costs")["amount"] == "REAL"
+    assert conn.execute("SELECT amount FROM costs ORDER BY id").fetchall() == [
+        (0.3,), (2.68,), (275.5,)]
+    upgrade_connection(conn)
+    assert (_schema(conn), _data(conn)) == after_upgrade
+    conn.close()
+
+
+def test_money_migration_rejects_non_numeric_value(tmp_path):
+    """Roskaa rahasarakkeessa (vanha km_rates-API ei validoinut) → migraatio
+    keskeytyy eikä kantaa jätetä puolitiehen."""
+    path = str(tmp_path / "bad.db")
+    conn = _pre_alembic_db(path)
+    conn.execute("UPDATE km_rates SET domestic_rate = 'abc'")
+    conn.commit()
+    with pytest.raises(ValueError, match="km_rates.domestic_rate"):
+        upgrade_connection(conn)
+    assert current_revision(conn) is None  # baselinekin peruttiin
+    assert _types(conn, "costs")["amount"] == "REAL"
+    conn.close()
+
+
+def test_money_column_rejects_float(tmp_path):
+    path = str(tmp_path / "check.db")
+    upgrade_db(path)
+    conn = sqlite3.connect(path)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO costs (trip_id, cost_code, description, amount_cents) "
+                     "VALUES (1, '120', 'X', 10.5)")
+    conn.execute("INSERT INTO costs (trip_id, cost_code, description, amount_cents) "
+                 "VALUES (1, '120', 'X', 1050)")
     conn.close()

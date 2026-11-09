@@ -16,6 +16,7 @@ Kaikki asiakkaat, reitit ja hinnat ovat keksittyä demodataa.
 
 import re
 
+import money
 from surcharges import (
     PRODUCT_TYPES, RATE_TYPES as SURCHARGE_RATE_TYPES,
     _norm, _norm_upper, _to_date, _opt_number, _table_exists,
@@ -43,42 +44,49 @@ _FALSE_VALUES = {"0", "false", "no", "ei", "off"}
 # ── Skeema ────────────────────────────────────────────────────────────
 
 def ensure_customer_pricing_tables(conn):
-    """Luo customer_rate_cards- ja customer_billing_rules-taulut. Idempotentti."""
-    conn.execute("""
-CREATE TABLE IF NOT EXISTS customer_rate_cards (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    customer_id INTEGER NOT NULL REFERENCES customers(id),
-    origin_country TEXT NOT NULL,
-    origin_zip_prefix TEXT,
-    dest_country TEXT NOT NULL,
-    dest_zip_prefix TEXT,
-    product_type TEXT NOT NULL CHECK (product_type IN ('FTL', 'LTL')),
-    freight_price REAL NOT NULL CHECK (freight_price >= 0),
-    valid_from TEXT NOT NULL,
-    valid_to TEXT
-)
-""")
-    conn.execute("""
-CREATE INDEX IF NOT EXISTS idx_customer_rate_cards_lookup
-    ON customer_rate_cards (customer_id, origin_country, dest_country)
-""")
-    conn.execute("""
-CREATE TABLE IF NOT EXISTS customer_billing_rules (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    customer_id INTEGER NOT NULL REFERENCES customers(id),
-    service_code TEXT NOT NULL,
-    billed INTEGER NOT NULL DEFAULT 1 CHECK (billed IN (0, 1)),
-    rate_type TEXT CHECK (rate_type IN
-        ('percent', 'fixed', 'per_100kg', 'per_km', 'pass_through')),
-    rate REAL CHECK (rate >= 0),
-    valid_from TEXT NOT NULL,
-    valid_to TEXT
-)
-""")
-    conn.execute("""
-CREATE INDEX IF NOT EXISTS idx_customer_billing_rules_lookup
-    ON customer_billing_rules (customer_id, service_code)
-""")
+    """Varmistaa skeeman (Alembic upgrade head). Idempotentti."""
+    from db_migrate import upgrade_connection
+    upgrade_connection(conn)
+
+
+def _insert(conn, table, values):
+    """Lisää rivin; values API-kentillä (rahat euroina). Palauttaa id:n."""
+    data = money.values_to_db(table, values)
+    cols = list(data)
+    cur = conn.execute(
+        f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+        [data[c] for c in cols],
+    )
+    return cur.lastrowid
+
+
+def _update(conn, table, row_id, values):
+    data = money.values_to_db(table, values)
+    cols = list(data)
+    conn.execute(
+        f"UPDATE {table} SET {', '.join(c + ' = ?' for c in cols)} WHERE id = ?",
+        [data[c] for c in cols] + [row_id],
+    )
+
+
+def insert_rate_card(conn, values):
+    return _insert(conn, "customer_rate_cards", values)
+
+
+def update_rate_card(conn, row_id, values):
+    _update(conn, "customer_rate_cards", row_id, values)
+
+
+def insert_billing_rule(conn, values):
+    return _insert(conn, "customer_billing_rules", values)
+
+
+def update_billing_rule(conn, row_id, values):
+    _update(conn, "customer_billing_rules", row_id, values)
+
+
+def rate_card_as_dict(row):
+    return money.row_from_db("customer_rate_cards", row)
 
 
 # ── Demodata ──────────────────────────────────────────────────────────
@@ -164,18 +172,10 @@ def seed_customer_pricing(conn):
         name = customer[0]
         cid = ensure_demo_customer(conn, customer)
         for card in DEMO_RATE_CARDS.get(name, []):
-            conn.execute(
-                f"INSERT INTO customer_rate_cards ({', '.join(RATE_CARD_COLUMNS)}) "
-                f"VALUES ({', '.join('?' * len(RATE_CARD_COLUMNS))})",
-                (cid, *card),
-            )
+            insert_rate_card(conn, dict(zip(RATE_CARD_COLUMNS, (cid, *card))))
             added_cards += 1
         for rule in DEMO_BILLING_RULES.get(name, []):
-            conn.execute(
-                f"INSERT INTO customer_billing_rules ({', '.join(BILLING_RULE_COLUMNS)}) "
-                f"VALUES ({', '.join('?' * len(BILLING_RULE_COLUMNS))})",
-                (cid, *rule),
-            )
+            insert_billing_rule(conn, dict(zip(BILLING_RULE_COLUMNS, (cid, *rule))))
             added_rules += 1
     return added_cards, added_rules
 
@@ -259,7 +259,7 @@ def find_rate_card(conn, customer_id, origin, dest, product_type, date):
 
     best, best_key = None, None
     for row in rows:
-        row = dict(row)
+        row = rate_card_as_dict(row)
         if not _valid_on(row, day):
             continue
         o_len = _zip_match_len(row["origin_zip_prefix"], o_zip, o_country)
@@ -278,7 +278,7 @@ def find_rate_card(conn, customer_id, origin, dest, product_type, date):
 
 
 def billing_rule_as_dict(row):
-    row = dict(row)
+    row = money.row_from_db("customer_billing_rules", row)
     row["billed"] = bool(row["billed"])
     return row
 
@@ -301,11 +301,11 @@ def get_billing_rule(conn, customer_id, service_code, date):
         "SELECT * FROM customer_billing_rules WHERE customer_id = ? AND service_code = ?",
         (customer_id, code),
     ).fetchall()
-    valid = [dict(r) for r in rows if _valid_on(dict(r), day)]
+    valid = [billing_rule_as_dict(r) for r in rows if _valid_on(r, day)]
     if not valid:
         return None
     best = max(valid, key=lambda r: (str(r["valid_from"]), r["id"]))
-    return billing_rule_as_dict(best)
+    return best
 
 
 # ── Syötteen validointi (API) ─────────────────────────────────────────
@@ -404,7 +404,7 @@ def validate_billing_rule_payload(data, conn):
         errors.append(f"rate_type ei kelpaa: {rate_type}")
     clean["rate_type"] = rate_type
 
-    rate = _opt_number(data, "rate", errors)
+    rate = _opt_number(data, "rate", errors, money.E4)
     if rate is not None and rate < 0:
         errors.append("rate ei voi olla negatiivinen")
     clean["rate"] = rate
@@ -443,7 +443,7 @@ def find_rate_card_overlap(conn, customer_id, clean, exclude_id=None):
         sql += " AND id != ?"
         params.append(exclude_id)
     row = conn.execute(sql, params).fetchone()
-    return dict(row) if row else None
+    return rate_card_as_dict(row)
 
 
 def find_billing_rule_overlap(conn, customer_id, clean, exclude_id=None):
@@ -460,7 +460,7 @@ def find_billing_rule_overlap(conn, customer_id, clean, exclude_id=None):
         sql += " AND id != ?"
         params.append(exclude_id)
     row = conn.execute(sql, params).fetchone()
-    return dict(row) if row else None
+    return billing_rule_as_dict(row) if row else None
 
 
 def delete_customer_pricing(conn, customer_id):

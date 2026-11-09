@@ -1,25 +1,50 @@
 import os
 import sqlite3
 from datetime import datetime
+from decimal import Decimal
 from flask import Flask, request, jsonify
+from flask.json.provider import DefaultJSONProvider
 from flask_cors import CORS
 
+import money
 from surcharges import (
     validate_surcharge_payload, find_overlap,
     SURCHARGE_COLUMNS, calculate_surcharge, select_rate,
     FUEL_SERVICE_CODE, FUEL_COST_TYPE, FUEL_RATE_TYPE, FUEL_ROW_FILTER,
     multiplier_to_rate, rate_to_multiplier, fuel_row_as_legacy,
+    insert_rate, update_rate, get_rate,
 )
 from customer_pricing import (
     delete_customer_pricing,
     validate_rate_card_payload, validate_billing_rule_payload,
     find_rate_card_overlap, find_billing_rule_overlap,
-    billing_rule_as_dict, RATE_CARD_COLUMNS, BILLING_RULE_COLUMNS,
+    billing_rule_as_dict, rate_card_as_dict, RATE_CARD_COLUMNS, BILLING_RULE_COLUMNS,
+    insert_rate_card, update_rate_card, insert_billing_rule, update_billing_rule,
 )
 from db_config import get_db_path
 
+
+class MoneyJSONProvider(DefaultJSONProvider):
+    """Decimal → JSON-numero (euroina). Flaskin oletus tekisi merkkijonon.
+
+    Vain serialisointi: laskenta tehdään Decimalilla (money.py).
+    """
+
+    @staticmethod
+    def default(o):
+        if isinstance(o, Decimal):
+            return float(o)
+        return DefaultJSONProvider.default(o)
+
+
 app = Flask(__name__)
+app.json_provider_class = MoneyJSONProvider
+app.json = MoneyJSONProvider(app)
 CORS(app)
+
+
+def _money_error(errors):
+    return jsonify({"error": "; ".join(errors), "errors": errors}), 400
 
 # Tietokantapolku: FREIGHT_DB_PATH tai oletuksena backend/freight.db.
 # Testit asettavat DB_NAME:n suoraan tmp_path-kantaan.
@@ -285,7 +310,15 @@ def get_trailers():
         "SELECT * FROM trailers ORDER BY trailer_type, plate_number"
     ).fetchall()
     conn.close()
-    return jsonify([dict(t) for t in trailers])
+    return jsonify([money.row_from_db("trailers", t) for t in trailers])
+
+
+def _trailer_rates(data):
+    """leasing_rate / rental_rate (€/pv) → (sentit, sentit, virheet)."""
+    errors = []
+    leasing = money.parse_field(data, "leasing_rate", errors) or Decimal(0)
+    rental = money.parse_field(data, "rental_rate", errors) or Decimal(0)
+    return money.to_cents(leasing), money.to_cents(rental), errors
 
 
 @app.route("/api/trailers", methods=["POST"])
@@ -293,18 +326,22 @@ def create_trailer():
     data = request.get_json()
     if not data or not data.get("plate_number") or not data.get("trailer_type"):
         return jsonify({"error": "Rekisterinumero ja tyyppi ovat pakollisia"}), 400
+    leasing_cents, rental_cents, errors = _trailer_rates(data)
+    if errors:
+        return _money_error(errors)
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO trailers (plate_number, identifier, trailer_type, leasing_company, leasing_rate, rental_rate, status)
+        INSERT INTO trailers (plate_number, identifier, trailer_type, leasing_company,
+                              leasing_rate_cents, rental_rate_cents, status)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (
         data.get("plate_number"),
         data.get("identifier", ""),
         data.get("trailer_type"),
         data.get("leasing_company", DEFAULT_LEASING_COMPANY),
-        float(data.get("leasing_rate", 0)),
-        float(data.get("rental_rate", 0)),
+        leasing_cents,
+        rental_cents,
         data.get("status", "Vapaa")
     ))
     conn.commit()
@@ -320,17 +357,21 @@ def update_trailer(trailer_id):
         conn.close()
         return jsonify({"error": "Traileria ei löydy"}), 404
     data = request.get_json()
+    leasing_cents, rental_cents, errors = _trailer_rates(data or {})
+    if errors:
+        conn.close()
+        return _money_error(errors)
     conn.execute("""
         UPDATE trailers SET plate_number=?, identifier=?, trailer_type=?,
-            leasing_company=?, leasing_rate=?, rental_rate=?, status=?
+            leasing_company=?, leasing_rate_cents=?, rental_rate_cents=?, status=?
         WHERE id=?
     """, (
         data.get("plate_number"),
         data.get("identifier", ""),
         data.get("trailer_type"),
         data.get("leasing_company", DEFAULT_LEASING_COMPANY),
-        float(data.get("leasing_rate", 0)),
-        float(data.get("rental_rate", 0)),
+        leasing_cents,
+        rental_cents,
         data.get("status", "Vapaa"),
         trailer_id
     ))
@@ -574,20 +615,19 @@ def get_trip(trip_id):
 
     result = dict(trip)
     result["orders"] = [dict(o) for o in orders]
-    result["costs"] = [dict(c) for c in costs]
+    cost_rows = [money.row_from_db("costs", c) for c in costs]
+    result["costs"] = cost_rows
     result["capacity"] = capacity
     result["max_weight"] = specs.get("max_weight", 24000)
     result["max_loading_meters"] = specs.get("max_loading_meters", 13.6)
     result["max_volume"] = specs.get("max_volume", 90)
 
-    total_costs = sum(c["amount"] for c in costs if c["cost_type"] == "cost")
-    total_revenue = sum(c["amount"] for c in costs if c["cost_type"] == "revenue")
-    result["total_costs"] = round(total_costs, 2)
-    result["total_revenue"] = round(total_revenue, 2)
-    result["margin"] = round(total_revenue - total_costs, 2)
-    result["margin_percent"] = round(
-        (result["margin"] / total_revenue * 100), 2
-    ) if total_revenue > 0 else 0
+    total_costs = money.total(c["amount"] for c in cost_rows if c["cost_type"] == "cost")
+    total_revenue = money.total(c["amount"] for c in cost_rows if c["cost_type"] == "revenue")
+    result["total_costs"] = money.round_money(total_costs)
+    result["total_revenue"] = money.round_money(total_revenue)
+    result["margin"] = money.round_money(total_revenue - total_costs)
+    result["margin_percent"] = money.percent_of(result["margin"], total_revenue)
 
     return jsonify(result)
 
@@ -731,7 +771,7 @@ def update_trip_status(trip_id):
 
     if new_status == "Vahvistettu":
         trip_data = conn.execute("""
-            SELECT t.*, tr.leasing_rate, tr.rental_rate
+            SELECT t.*, tr.leasing_rate_cents, tr.rental_rate_cents
             FROM trips t
             LEFT JOIN trailers tr ON t.trailer_id = tr.id
             WHERE t.id = ?
@@ -743,25 +783,29 @@ def update_trip_status(trip_id):
             delivery = date.fromisoformat(trip_data["delivery_date"])
             days = (delivery - loading).days + 1
 
-            if days > 0 and trip_data["leasing_rate"] and trip_data["rental_rate"]:
+            leasing_rate = money.from_cents(trip_data["leasing_rate_cents"])
+            rental_rate = money.from_cents(trip_data["rental_rate_cents"])
+            if days > 0 and leasing_rate and rental_rate:
                 existing = conn.execute("""
                     SELECT id FROM costs
                     WHERE trip_id = ? AND cost_code = '400'
                 """, (trip_id,)).fetchone()
 
                 if not existing:
-                    osto = round(days * trip_data["leasing_rate"], 2)
-                    myynti = round(days * trip_data["rental_rate"], 2)
+                    osto = money.round_money(days * leasing_rate)
+                    myynti = money.round_money(days * rental_rate)
 
                     conn.execute("""
-                        INSERT INTO costs (trip_id, cost_code, description, amount, cost_type)
+                        INSERT INTO costs (trip_id, cost_code, description, amount_cents, cost_type)
                         VALUES (?, '400', ?, ?, 'cost')
-                    """, (trip_id, f"TRAILERVUOKRA (osto) {days} pv x {trip_data['leasing_rate']} €", osto))
+                    """, (trip_id, f"TRAILERVUOKRA (osto) {days} pv x {leasing_rate} €",
+                          money.to_cents(osto)))
 
                     conn.execute("""
-                        INSERT INTO costs (trip_id, cost_code, description, amount, cost_type)
+                        INSERT INTO costs (trip_id, cost_code, description, amount_cents, cost_type)
                         VALUES (?, '400', ?, ?, 'revenue')
-                    """, (trip_id, f"TRAILERVUOKRA (myynti) {days} pv x {trip_data['rental_rate']} €", myynti))
+                    """, (trip_id, f"TRAILERVUOKRA (myynti) {days} pv x {rental_rate} €",
+                          money.to_cents(myynti)))
 
     conn.commit()
     conn.close()
@@ -1173,7 +1217,14 @@ def get_costs(trip_id):
         (trip_id,)
     ).fetchall()
     conn.close()
-    return jsonify([dict(c) for c in costs])
+    return jsonify([money.row_from_db("costs", c) for c in costs])
+
+
+def _cost_amount(data):
+    """Kulurivin summa pyynnöstä → (Decimal, virheet). Tyhjä = 0."""
+    errors = []
+    amount = money.parse_field(data, "amount", errors)
+    return (amount if amount is not None else Decimal(0)), errors
 
 
 @app.route("/api/trips/<int:trip_id>/costs", methods=["POST"])
@@ -1190,15 +1241,19 @@ def add_cost(trip_id):
         return jsonify({"error": "Laskutettu keikka on lukittu"}), 403
 
     data = request.get_json()
+    amount, errors = _cost_amount(data or {})
+    if errors:
+        conn.close()
+        return _money_error(errors)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO costs (trip_id, cost_code, description, amount, cost_type, custom_description)
+        INSERT INTO costs (trip_id, cost_code, description, amount_cents, cost_type, custom_description)
         VALUES (?, ?, ?, ?, ?, ?)
     """, (
         trip_id,
         data.get("cost_code"),
         data.get("description"),
-        float(data.get("amount", 0)),
+        money.to_cents(amount),
         data.get("cost_type", "cost"),
         data.get("custom_description")
     ))
@@ -1212,18 +1267,18 @@ def add_cost(trip_id):
             fuel = calculate_surcharge(FUEL_SERVICE_CODE, {
                 "cost_type": FUEL_COST_TYPE,
                 "date": ref_date,
-                "freight_amount": float(data.get("amount", 0)),
+                "freight_amount": amount,
             }, conn)
         except ValueError:
             fuel = None
 
         if fuel and fuel["amount"] > 0:
-            multiplier = rate_to_multiplier(fuel["rate"])
+            multiplier = rate_to_multiplier(fuel["rate"]).normalize()
             cursor.execute("""
-                INSERT INTO costs (trip_id, cost_code, description, amount, cost_type)
+                INSERT INTO costs (trip_id, cost_code, description, amount_cents, cost_type)
                 VALUES (?, ?, ?, ?, ?)
-            """, (trip_id, FUEL_SERVICE_CODE, f"POLTTOAINELISÄ (kerroin {multiplier})",
-                  fuel["amount"], FUEL_COST_TYPE))
+            """, (trip_id, FUEL_SERVICE_CODE, f"POLTTOAINELISÄ (kerroin {multiplier:f})",
+                  money.to_cents(fuel["amount"]), FUEL_COST_TYPE))
             fuel_cost_id = cursor.lastrowid
 
     conn.commit()
@@ -1254,13 +1309,17 @@ def update_cost(cost_id):
         return jsonify({"error": "Laskutettu keikka on lukittu"}), 403
 
     data = request.get_json()
+    amount, errors = _cost_amount(data or {})
+    if errors:
+        conn.close()
+        return _money_error(errors)
     conn.execute("""
-        UPDATE costs SET cost_code=?, description=?, amount=?, cost_type=?, custom_description=?
+        UPDATE costs SET cost_code=?, description=?, amount_cents=?, cost_type=?, custom_description=?
         WHERE id=?
     """, (
         data.get("cost_code"),
         data.get("description"),
-        float(data.get("amount", 0)),
+        money.to_cents(amount),
         data.get("cost_type", "cost"),
         data.get("custom_description"),
         cost_id
@@ -1319,8 +1378,8 @@ def get_dashboard():
         ) oc ON oc.trip_id = t.id
         LEFT JOIN (
             SELECT trip_id,
-                   SUM(CASE WHEN cost_type='revenue' THEN amount ELSE 0 END) as total_revenue,
-                   SUM(CASE WHEN cost_type='cost' THEN amount ELSE 0 END) as total_costs
+                   SUM(CASE WHEN cost_type='revenue' THEN amount_cents ELSE 0 END) as total_revenue,
+                   SUM(CASE WHEN cost_type='cost' THEN amount_cents ELSE 0 END) as total_costs
             FROM costs GROUP BY trip_id
         ) cs ON cs.trip_id = t.id
         ORDER BY t.created_at DESC
@@ -1332,10 +1391,10 @@ def get_dashboard():
             (SELECT COUNT(*) FROM trips) as total_trips,
             (SELECT COUNT(*) FROM orders
               WHERE trip_id IN (SELECT id FROM trips)) as total_orders,
-            (SELECT COALESCE(SUM(co.amount), 0) FROM costs co
+            (SELECT COALESCE(SUM(co.amount_cents), 0) FROM costs co
                JOIN trips t ON co.trip_id = t.id
               WHERE co.cost_type = 'revenue') as total_revenue,
-            (SELECT COALESCE(SUM(co.amount), 0) FROM costs co
+            (SELECT COALESCE(SUM(co.amount_cents), 0) FROM costs co
                JOIN trips t ON co.trip_id = t.id
               WHERE co.cost_type = 'cost') as total_costs
     """).fetchone()
@@ -1346,27 +1405,25 @@ def get_dashboard():
 
     conn.close()
 
+    # SQL-summat ovat sentteinä (kokonaislukuja) → Decimal euroiksi
     trips_list = []
     for t in trips:
         d = dict(t)
-        revenue = d["total_revenue"]
-        costs = d["total_costs"]
-        margin = round(revenue - costs, 2)
-        d["margin"] = margin
-        d["margin_percent"] = round(margin / revenue * 100, 2) if revenue > 0 else 0
-        d["total_revenue"] = round(revenue, 2)
-        d["total_costs"] = round(costs, 2)
+        revenue = money.from_cents(d["total_revenue"])
+        costs = money.from_cents(d["total_costs"])
+        d["margin"] = revenue - costs
+        d["margin_percent"] = money.percent_of(d["margin"], revenue)
+        d["total_revenue"] = revenue
+        d["total_costs"] = costs
         trips_list.append(d)
 
     kpi_dict = dict(kpi)
-    total_revenue = kpi_dict["total_revenue"]
-    total_costs = kpi_dict["total_costs"]
-    kpi_dict["total_revenue"] = round(total_revenue, 2)
-    kpi_dict["total_costs"] = round(total_costs, 2)
-    kpi_dict["margin"] = round(total_revenue - total_costs, 2)
-    kpi_dict["margin_percent"] = round(
-        (kpi_dict["margin"] / total_revenue * 100), 2
-    ) if total_revenue > 0 else 0
+    total_revenue = money.from_cents(kpi_dict["total_revenue"])
+    total_costs = money.from_cents(kpi_dict["total_costs"])
+    kpi_dict["total_revenue"] = total_revenue
+    kpi_dict["total_costs"] = total_costs
+    kpi_dict["margin"] = total_revenue - total_costs
+    kpi_dict["margin_percent"] = money.percent_of(kpi_dict["margin"], total_revenue)
 
     return jsonify({
         "kpi": kpi_dict,
@@ -1481,16 +1538,13 @@ def delete_customer(customer_id):
 # fuel_rates-taulua ei enää käytetä (poisto UI-vaiheessa).
 
 def _fuel_rows(conn):
-    return conn.execute(
+    return [money.row_from_db("surcharge_rates", r) for r in conn.execute(
         f"SELECT * FROM surcharge_rates WHERE {FUEL_ROW_FILTER}"
-    ).fetchall()
+    ).fetchall()]
 
 
 def _get_fuel_row(conn, rate_id):
-    return conn.execute(
-        f"SELECT * FROM surcharge_rates WHERE id = ? AND {FUEL_ROW_FILTER}",
-        (rate_id,),
-    ).fetchone()
+    return get_rate(conn, rate_id, FUEL_ROW_FILTER)
 
 
 def _fuel_payload_to_clean(data, conn):
@@ -1498,10 +1552,10 @@ def _fuel_payload_to_clean(data, conn):
     if not data or not data.get("valid_from") or not data.get("valid_to") or not data.get("multiplier"):
         return None, ["valid_from, valid_to ja multiplier ovat pakollisia"]
     try:
-        multiplier = float(data["multiplier"])
-    except (TypeError, ValueError):
+        multiplier = money.to_decimal(data["multiplier"])
+    except ValueError:
         return None, ["multiplier ei ole numero"]
-    if multiplier < 1.0:
+    if multiplier < 1:
         return None, ["Kertoimen on oltava vähintään 1"]
     return validate_surcharge_payload({
         "service_code": FUEL_SERVICE_CODE,
@@ -1524,20 +1578,11 @@ def _save_fuel_rate(conn, rate_id=None):
             "error": "Kertoimella on jo päällekkäinen voimassaolo",
             "conflict_id": overlap["id"],
         }), 409)
-    values = [clean[c] for c in SURCHARGE_COLUMNS]
+    values = {c: clean[c] for c in SURCHARGE_COLUMNS}
     if rate_id is None:
-        cur = conn.execute(
-            f"INSERT INTO surcharge_rates ({', '.join(SURCHARGE_COLUMNS)}) "
-            f"VALUES ({', '.join('?' * len(SURCHARGE_COLUMNS))})",
-            values,
-        )
-        rate_id = cur.lastrowid
+        rate_id = insert_rate(conn, values)
     else:
-        conn.execute(
-            f"UPDATE surcharge_rates SET "
-            f"{', '.join(c + ' = ?' for c in SURCHARGE_COLUMNS)} WHERE id = ?",
-            values + [rate_id],
-        )
+        update_rate(conn, rate_id, values)
     conn.commit()
     return rate_id, None
 
@@ -1555,7 +1600,7 @@ def get_fuel_rates():
 def get_current_fuel_rate():
     date_str = request.args.get("date", datetime.now().strftime("%Y-%m-%d"))
     conn = get_db_connection()
-    rows = [dict(r) for r in _fuel_rows(conn)]
+    rows = _fuel_rows(conn)
     conn.close()
     try:
         rate = select_rate(rows, {"cost_type": FUEL_COST_TYPE, "date": date_str})
@@ -1630,8 +1675,8 @@ def get_costs_dashboard():
             t.trip_end_city, t.trip_end_country,
             t.loading_date,
             c.name AS carrier_name,
-            COALESCE(SUM(CASE WHEN co.cost_type='revenue' THEN co.amount ELSE 0 END),0) AS revenue,
-            COALESCE(SUM(CASE WHEN co.cost_type='cost'    THEN co.amount ELSE 0 END),0) AS costs
+            COALESCE(SUM(CASE WHEN co.cost_type='revenue' THEN co.amount_cents ELSE 0 END),0) AS revenue,
+            COALESCE(SUM(CASE WHEN co.cost_type='cost'    THEN co.amount_cents ELSE 0 END),0) AS costs
         FROM trips t
         LEFT JOIN carriers c  ON t.carrier_id = c.id
         LEFT JOIN costs   co  ON t.id = co.trip_id
@@ -1642,10 +1687,10 @@ def get_costs_dashboard():
 
     trip_list = []
     for t in trips_raw:
-        rev    = t["revenue"] or 0
-        osto   = t["costs"]   or 0
+        rev    = money.from_cents(t["revenue"] or 0)
+        osto   = money.from_cents(t["costs"] or 0)
         margin = rev - osto
-        pct    = round(margin / rev * 100, 1) if rev > 0 else 0.0
+        pct    = money.percent_of(margin, rev, places=1)
         start  = f"{t['first_pickup_country'] or ''} {t['first_pickup_city'] or '—'}".strip()
         end    = f"{t['trip_end_country'] or ''} {t['trip_end_city'] or '—'}".strip()
         trip_list.append({
@@ -1655,45 +1700,45 @@ def get_costs_dashboard():
             "route": f"{start} → {end}",
             "carrier_name": t["carrier_name"] or "—",
             "loading_date": t["loading_date"],
-            "revenue": round(rev, 2),
-            "costs":   round(osto, 2),
-            "margin":  round(margin, 2),
+            "revenue": rev,
+            "costs":   osto,
+            "margin":  margin,
             "margin_pct": pct,
         })
 
     # KPI-summat
-    total_rev    = sum(r["revenue"] for r in trip_list)
-    total_costs  = sum(r["costs"]   for r in trip_list)
+    total_rev    = money.total(r["revenue"] for r in trip_list)
+    total_costs  = money.total(r["costs"] for r in trip_list)
     total_margin = total_rev - total_costs
-    total_pct    = round(total_margin / total_rev * 100, 1) if total_rev > 0 else 0.0
+    total_pct    = money.percent_of(total_margin, total_rev, places=1)
 
     # Kategoriasummat
     categories = {}
     for cat_key, codes in CATEGORY_CODES.items():
         if not codes:
-            categories[cat_key] = {"osto": 0.0, "myynti": 0.0}
+            categories[cat_key] = {"osto": Decimal("0.00"), "myynti": Decimal("0.00")}
             continue
         ph = ",".join("?" * len(codes))
         row = conn.execute(f"""
             SELECT
-                COALESCE(SUM(CASE WHEN co.cost_type='cost'    THEN co.amount ELSE 0 END),0) AS osto,
-                COALESCE(SUM(CASE WHEN co.cost_type='revenue' THEN co.amount ELSE 0 END),0) AS myynti
+                COALESCE(SUM(CASE WHEN co.cost_type='cost'    THEN co.amount_cents ELSE 0 END),0) AS osto,
+                COALESCE(SUM(CASE WHEN co.cost_type='revenue' THEN co.amount_cents ELSE 0 END),0) AS myynti
             FROM costs co
             JOIN trips t ON co.trip_id = t.id
             WHERE co.cost_code IN ({ph})
             {"AND t.loading_date BETWEEN ? AND ?" if date_filter else ""}
         """, (*codes, *params)).fetchone()
         categories[cat_key] = {
-            "osto":   round(row["osto"]   or 0, 2),
-            "myynti": round(row["myynti"] or 0, 2),
+            "osto":   money.from_cents(row["osto"] or 0),
+            "myynti": money.from_cents(row["myynti"] or 0),
         }
 
     conn.close()
     return jsonify({
         "kpi": {
-            "revenue":     round(total_rev, 2),
-            "costs":       round(total_costs, 2),
-            "margin":      round(total_margin, 2),
+            "revenue":     total_rev,
+            "costs":       total_costs,
+            "margin":      total_margin,
             "margin_pct":  total_pct,
             "trip_count":  len(trip_list),
         },
@@ -1769,9 +1814,11 @@ def driver_checkin(trip_id_str):
             delay_h = (actual_start - window_end).total_seconds() / 3600
             if delay_h > 0.5:
                 conn.execute("""
-                    INSERT INTO costs (trip_id, cost_code, description, amount, cost_type)
+                    INSERT INTO costs (trip_id, cost_code, description, amount_cents, cost_type)
                     VALUES (?, '800', 'ODOTUSAIKA (FEC-automaatti)', ?, 'cost')
-                """, (trip["id"], round(delay_h * 45, 2)))
+                """, (trip["id"], money.to_cents(round(delay_h * 45, 2))))
+                # delay_h * 45 -laskenta korjataan erillisessä issuessa;
+                # tässä muutettiin vain tallennus sentteinä.
         except Exception:
             pass
 
@@ -2088,13 +2135,33 @@ def update_refrigeration(tid):
 
 
 # ===== KM RATES =====
+#
+# domestic_rate / continent_rate ovat €/km-hintoja: kannassa ×10 000
+# (domestic_rate_e4), API:ssa euroina.
+
+def _km_rate_values(data):
+    errors = []
+    domestic = money.parse_field(data, "domestic_rate", errors, money.E4)
+    continent = money.parse_field(data, "continent_rate", errors, money.E4)
+    for field, value in (("domestic_rate", domestic), ("continent_rate", continent)):
+        if value is None and f"{field} ei ole numero" not in errors:
+            errors.append(f"{field} puuttuu")
+        elif value is not None and value < 0:
+            errors.append(f"{field} ei voi olla negatiivinen")
+    return (money.to_e4(domestic), money.to_e4(continent)), errors
+
+
+def _km_rate_row(conn, rid):
+    return money.row_from_db(
+        "km_rates", conn.execute("SELECT * FROM km_rates WHERE id=?", (rid,)).fetchone())
+
 
 @app.route("/api/km-rates", methods=["GET"])
 def get_km_rates():
     conn = get_db_connection()
     rows = conn.execute("SELECT * FROM km_rates ORDER BY valid_from DESC").fetchall()
     conn.close()
-    return jsonify([dict(r) for r in rows])
+    return jsonify([money.row_from_db("km_rates", r) for r in rows])
 
 
 @app.route("/api/km-rates/current", methods=["GET"])
@@ -2110,38 +2177,45 @@ def get_current_km_rate():
     conn.close()
     if not row:
         return jsonify({"error": "Ei voimassa olevaa km-hinnastoa"}), 404
-    return jsonify(dict(row))
+    return jsonify(money.row_from_db("km_rates", row))
 
 
 @app.route("/api/km-rates", methods=["POST"])
 def create_km_rate():
-    data = request.get_json()
+    data = request.get_json() or {}
+    (domestic, continent), errors = _km_rate_values(data)
+    if errors:
+        return _money_error(errors)
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO km_rates (valid_from, valid_to, domestic_rate, continent_rate, notes)
+        INSERT INTO km_rates (valid_from, valid_to, domestic_rate_e4, continent_rate_e4, notes)
         VALUES (?,?,?,?,?)
     """, (data.get("valid_from"), data.get("valid_to") or None,
-          data.get("domestic_rate"), data.get("continent_rate"), data.get("notes")))
+          domestic, continent, data.get("notes")))
     new_id = cursor.lastrowid
     conn.commit()
-    row = conn.execute("SELECT * FROM km_rates WHERE id=?", (new_id,)).fetchone()
+    row = _km_rate_row(conn, new_id)
     conn.close()
-    return jsonify(dict(row)), 201
+    return jsonify(row), 201
 
 
 @app.route("/api/km-rates/<int:rid>", methods=["PUT"])
 def update_km_rate(rid):
-    data = request.get_json()
+    data = request.get_json() or {}
+    (domestic, continent), errors = _km_rate_values(data)
+    if errors:
+        return _money_error(errors)
     conn = get_db_connection()
     conn.execute("""
-        UPDATE km_rates SET valid_from=?, valid_to=?, domestic_rate=?, continent_rate=?, notes=? WHERE id=?
+        UPDATE km_rates SET valid_from=?, valid_to=?, domestic_rate_e4=?, continent_rate_e4=?, notes=?
+        WHERE id=?
     """, (data.get("valid_from"), data.get("valid_to") or None,
-          data.get("domestic_rate"), data.get("continent_rate"), data.get("notes"), rid))
+          domestic, continent, data.get("notes"), rid))
     conn.commit()
-    row = conn.execute("SELECT * FROM km_rates WHERE id=?", (rid,)).fetchone()
+    row = _km_rate_row(conn, rid)
     conn.close()
-    return jsonify(dict(row))
+    return jsonify(row)
 
 
 @app.route("/api/km-rates/<int:rid>", methods=["DELETE"])
@@ -2155,43 +2229,64 @@ def delete_km_rate(rid):
 
 # ===== FERRY RATES =====
 
+def _ferry_price(data):
+    errors = []
+    price = money.parse_field(data, "price", errors)
+    if price is None and "price ei ole numero" not in errors:
+        errors.append("price puuttuu")
+    elif price is not None and price < 0:
+        errors.append("price ei voi olla negatiivinen")
+    return money.to_cents(price), errors
+
+
+def _ferry_row(conn, rid):
+    return money.row_from_db(
+        "ferry_rates", conn.execute("SELECT * FROM ferry_rates WHERE id=?", (rid,)).fetchone())
+
+
 @app.route("/api/ferry-rates-db", methods=["GET"])
 def get_ferry_rates_db():
     conn = get_db_connection()
     rows = conn.execute("SELECT * FROM ferry_rates ORDER BY route").fetchall()
     conn.close()
-    return jsonify([dict(r) for r in rows])
+    return jsonify([money.row_from_db("ferry_rates", r) for r in rows])
 
 
 @app.route("/api/ferry-rates-db", methods=["POST"])
 def create_ferry_rate():
-    data = request.get_json()
+    data = request.get_json() or {}
+    price_cents, errors = _ferry_price(data)
+    if errors:
+        return _money_error(errors)
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO ferry_rates (route, price, valid_from, valid_to, notes)
+        INSERT INTO ferry_rates (route, price_cents, valid_from, valid_to, notes)
         VALUES (?,?,?,?,?)
-    """, (data.get("route"), data.get("price"), data.get("valid_from"),
+    """, (data.get("route"), price_cents, data.get("valid_from"),
           data.get("valid_to") or None, data.get("notes")))
     new_id = cursor.lastrowid
     conn.commit()
-    row = conn.execute("SELECT * FROM ferry_rates WHERE id=?", (new_id,)).fetchone()
+    row = _ferry_row(conn, new_id)
     conn.close()
-    return jsonify(dict(row)), 201
+    return jsonify(row), 201
 
 
 @app.route("/api/ferry-rates-db/<int:rid>", methods=["PUT"])
 def update_ferry_rate(rid):
-    data = request.get_json()
+    data = request.get_json() or {}
+    price_cents, errors = _ferry_price(data)
+    if errors:
+        return _money_error(errors)
     conn = get_db_connection()
     conn.execute("""
-        UPDATE ferry_rates SET route=?, price=?, valid_from=?, valid_to=?, notes=? WHERE id=?
-    """, (data.get("route"), data.get("price"), data.get("valid_from"),
+        UPDATE ferry_rates SET route=?, price_cents=?, valid_from=?, valid_to=?, notes=? WHERE id=?
+    """, (data.get("route"), price_cents, data.get("valid_from"),
           data.get("valid_to") or None, data.get("notes"), rid))
     conn.commit()
-    row = conn.execute("SELECT * FROM ferry_rates WHERE id=?", (rid,)).fetchone()
+    row = _ferry_row(conn, rid)
     conn.close()
-    return jsonify(dict(row))
+    return jsonify(row)
 
 
 @app.route("/api/ferry-rates-db/<int:rid>", methods=["DELETE"])
@@ -2230,7 +2325,7 @@ def get_surcharge_rates():
     conn = get_db_connection()
     rows = conn.execute(sql, params).fetchall()
     conn.close()
-    return jsonify([dict(r) for r in rows])
+    return jsonify([money.row_from_db("surcharge_rates", r) for r in rows])
 
 
 def _save_surcharge_rate(rid=None):
@@ -2249,24 +2344,14 @@ def _save_surcharge_rate(rid=None):
                 "error": "Samalla kohdistuksella on jo päällekkäinen voimassaolo",
                 "conflict_id": overlap["id"],
             }), 409
-        values = [clean[c] for c in SURCHARGE_COLUMNS]
+        values = {c: clean[c] for c in SURCHARGE_COLUMNS}
         if rid is None:
-            cur = conn.execute(
-                f"INSERT INTO surcharge_rates ({', '.join(SURCHARGE_COLUMNS)}) "
-                f"VALUES ({', '.join('?' * len(SURCHARGE_COLUMNS))})",
-                values,
-            )
-            rid, status = cur.lastrowid, 201
+            rid, status = insert_rate(conn, values), 201
         else:
-            conn.execute(
-                f"UPDATE surcharge_rates SET "
-                f"{', '.join(c + ' = ?' for c in SURCHARGE_COLUMNS)} WHERE id = ?",
-                values + [rid],
-            )
+            update_rate(conn, rid, values)
             status = 200
         conn.commit()
-        row = conn.execute("SELECT * FROM surcharge_rates WHERE id = ?", (rid,)).fetchone()
-        return jsonify(dict(row)), status
+        return jsonify(get_rate(conn, rid)), status
     finally:
         conn.close()
 
@@ -2306,7 +2391,9 @@ _CUSTOMER_PRICING = {
         "overlap": find_rate_card_overlap,
         "order": "origin_country, dest_country, product_type, "
                  "origin_zip_prefix, dest_zip_prefix, valid_from",
-        "as_dict": dict,
+        "as_dict": rate_card_as_dict,
+        "insert": insert_rate_card,
+        "update": update_rate_card,
         "not_found": "Hinnastoriviä ei löydy",
     },
     "billing_rules": {
@@ -2316,6 +2403,8 @@ _CUSTOMER_PRICING = {
         "overlap": find_billing_rule_overlap,
         "order": "service_code, valid_from",
         "as_dict": billing_rule_as_dict,
+        "insert": insert_billing_rule,
+        "update": update_billing_rule,
         "not_found": "Lisäsääntöä ei löydy",
     },
 }
@@ -2373,21 +2462,11 @@ def _save_customer_pricing(kind, customer_id=None, row_id=None):
             }), 409
 
         clean["customer_id"] = customer_id
-        columns = cfg["columns"]
-        values = [clean[c] for c in columns]
+        values = {c: clean[c] for c in cfg["columns"]}
         if row_id is None:
-            cur = conn.execute(
-                f"INSERT INTO {table} ({', '.join(columns)}) "
-                f"VALUES ({', '.join('?' * len(columns))})",
-                values,
-            )
-            row_id, status = cur.lastrowid, 201
+            row_id, status = cfg["insert"](conn, values), 201
         else:
-            conn.execute(
-                f"UPDATE {table} SET {', '.join(c + ' = ?' for c in columns)} "
-                "WHERE id = ?",
-                values + [row_id],
-            )
+            cfg["update"](conn, row_id, values)
             status = 200
         conn.commit()
         row = conn.execute(f"SELECT * FROM {table} WHERE id = ?", (row_id,)).fetchone()

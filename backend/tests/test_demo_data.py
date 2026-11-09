@@ -125,7 +125,7 @@ def test_schema_default_leasing_company_is_demo(demo_db):
 def _trip_lines(conn):
     trips = {}
     for r in conn.execute(
-        "SELECT t.trip_id, c.cost_code, c.cost_type, c.amount "
+        "SELECT t.trip_id, c.cost_code, c.cost_type, c.amount_cents AS amount "
         "FROM costs c JOIN trips t ON t.id = c.trip_id"
     ):
         trips.setdefault(r["trip_id"], []).append(r)
