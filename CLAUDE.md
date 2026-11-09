@@ -7,6 +7,9 @@ React 18 + Python Flask + SQLite. Kaikki data on keksittyä demodataa.
 
 ## Käynnistys
 
+**Tuetut Python-versiot: 3.11 ja 3.15.** CI ajaa backendin testit molemmilla
+(`.github/workflows/tests.yml`, matriisi `["3.11", "3.15"]`, `allow-prereleases: true`).
+
 ```bash
 # Backend
 cd backend
