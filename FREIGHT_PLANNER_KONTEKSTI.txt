@@ -1,5 +1,5 @@
 FREIGHT PLANNER — PROJEKTIN KONTEKSTI VS CODE CLAUDELLE
-Päivitetty: 04.11.2026 (v12)
+Päivitetty: 09.11.2026 (v13)
 ============================================================
 
 ROOLI:
@@ -18,6 +18,35 @@ TEKNINEN STACK:
 - Frontend: http://localhost:3000
 - GitHub: github.com/Vode72/freight-planner
 - Demo: demo / freight2024
+
+============================================================
+TIETOKANTA — MIGRAATIOT JA RAHAMUOTO (issue #22) ✅
+============================================================
+
+Alembic: backend/alembic.ini + backend/migrations/ (render_as_batch=True)
+  0001_baseline       jäädytetty skeema ennen Alembicia, ei muuta dataa
+  0002_reference_data palvelukoodisto + 401/831→400/830, oletusasetukset,
+                      fuel_rates → surcharge_rates (vanhat kannat)
+  0003_money_integer  REAL-rahasarakkeet → INTEGER (*_cents / *_e4)
+  Ajo: cd backend && alembic upgrade head  (tai -x db=polku)
+  Koodista: db_migrate.upgrade_db(polku) / upgrade_connection(conn).
+  init_db.create_schema(conn) = upgrade head. app.migrate_db() = upgrade head
+  käynnistyksessä. migrate_*.py ovat ohuita kääreitä (upgrade head).
+  Demodata EI ole migraatioissa: init_db.seed_demo_data() / seed_reference_demo().
+  Skeemamuutos = uusi revisio (alembic revision -m "..."), vanhoja ei muokata.
+
+Rahamuoto: backend/money.py on ainoa muunnospaikka.
+  Kanta:    INTEGER — summat sentteinä (*_cents, ×100),
+            yksikköhinnat ja prosentit ×10 000 (*_e4). CHECK typeof = integer.
+  Laskenta: Decimal, ROUND_HALF_UP. Ei floatia backendin rahalaskennassa.
+  API:      euroina JSON-numeroina, kentät ilman päätettä (amount, rate, price…).
+            Syöte: numero tai merkkijono ("12,50" / "12.50"); virhe → 400.
+  Sarakkeet: costs.amount_cents, trailers.leasing_rate_cents/rental_rate_cents,
+    ferry_rates.price_cents, km_rates.domestic_rate_e4/continent_rate_e4,
+    surcharge_rates.rate_e4/min_amount_cents/max_amount_cents,
+    customer_rate_cards.freight_price_cents, customer_billing_rules.rate_e4.
+  Avoimet: selaimen summalaskenta (TripDetail, CostCalculator, CostsDashboard)
+    floatilla → erillinen issue; FEC-odotusaika delay_h * 45 → erillinen issue.
 
 ============================================================
 TIETOKANTA — TAULUT
@@ -53,7 +82,7 @@ orders:
   loading_instructions, loading_date/time, delivery_date/time
 
 costs:
-  trip_id, cost_code, description, amount, cost_type (cost/revenue), custom_description
+  trip_id, cost_code, description, amount_cents, cost_type (cost/revenue), custom_description
   ── TULOSSA (spec v1.1) ──
   order_id, line_type, is_auto, created_by, reversed_by (#6)
   reversal_of_id — vastakirjaus lukitulle keikalle (#7)
@@ -77,13 +106,13 @@ HINNOITTELUMOOTTORIN BACKLOG (docs/pricing-engine-spec.md v1.1, label pricing):
 
 services: ✅ VALMIS (issue #2, hinnoittelun vaihe 1)
   code (PK), name, category, default_cost_type, active
-  Koodisto: backend/services.py (SERVICES). create_schema(), migrate_services.py
-  ja app.migrate_db() ajavat ensure_services() + merge_legacy_codes() (idempotentti).
+  Koodisto: backend/services.py (SERVICES). Alembic 0002 + db_migrate.sync_reference_data()
+  (jokaisen upgraden jälkeen) ajavat ensure_services() + merge_legacy_codes() (idempotentti).
 
 surcharge_rates: ✅ VALMIS (issue #3, hinnoittelun vaihe 2)
   id, service_code, cost_type (revenue/cost, pakollinen), trade_type, product_type,
-  country, operator, rate_type (percent/fixed/per_100kg/per_km), rate,
-  min_amount, max_amount, valid_from, valid_to
+  country, operator, rate_type (percent/fixed/per_100kg/per_km), rate_e4,
+  min_amount_cents, max_amount_cents, valid_from, valid_to
   Logiikka: backend/surcharges.py — calculate_surcharge(service_code, context, conn),
   select_rate(), derive_trade_type(). Tyhjä kohdistuskenttä = kaikki; tarkin voittaa
   (maa 8 > tuote 4 > operaattori 2 > suunta 1). Ei hintaa → None.
@@ -95,22 +124,22 @@ surcharge_rates: ✅ VALMIS (issue #3, hinnoittelun vaihe 2)
         540 MARPOL (revenue: FTL 45 €, LTL 0,40 €/100 kg min 5 €).
         200 polttoainelisä (revenue, percent, kohdistus tyhjä) — siirretty
         fuel_rates-taulusta (issue #4): 15, 16, 18, 17, 19 % tammi-touko 2026.
-  migrate_surcharges.py + app.migrate_db() (idempotentti, demodata vain tyhjään tauluun).
+  Demodata: init_db.seed_reference_demo() (reset_demo), vain tyhjään tauluun.
 
 Polttoainelisän siirto: ✅ VALMIS (issue #4, hinnoittelun vaihe 3, spec 7.5)
   surcharges.migrate_fuel_rates(): kertaluonteinen fuel_rates → surcharge_rates
-  (200 / revenue / percent, rate = round((m − 1) × 100, 4), kerroin ≤ 1 ohitetaan).
-  Ajetaan run_surcharges_migration()-funktiosta; merkitään schema_migrations-
+  (200 / revenue / percent, rate = (m − 1) × 100 Decimalina 4 des., kerroin ≤ 1 ohitetaan).
+  Ajetaan Alembic 0002:ssa (vanhat kannat) ja demodatan siemennyksessä; merkitään schema_migrations-
   tauluun (name = fuel_rates_to_surcharge_rates), joten ajetaan vain kerran.
   Siirron jälkeen surcharge_rates on ainoa tietolähde.
 
 customer_rate_cards + customer_billing_rules: ✅ VALMIS (issue #5, vaihe 4, spec luku 8)
   customer_rate_cards: id, customer_id, origin_country, origin_zip_prefix,
     dest_country, dest_zip_prefix, product_type (FTL/LTL, pakollinen),
-    freight_price, valid_from, valid_to
+    freight_price_cents, valid_from, valid_to
   customer_billing_rules: id, customer_id, service_code, billed (0/1),
     rate_type (percent/fixed/per_100kg/per_km/pass_through tai tyhjä = listahinta),
-    rate (pass_through: kate-%, tyhjä = 0), valid_from, valid_to
+    rate_e4 (pass_through: kate-%, tyhjä = 0), valid_from, valid_to
   Logiikka: backend/customer_pricing.py
     find_rate_card(conn, customer_id, origin, dest, product_type, date):
       zip-alue = postinumeron alku; osuma molemmissa päissä > yhdessä > pelkkä maa,
@@ -125,7 +154,7 @@ customer_rate_cards + customer_billing_rules: ✅ VALMIS (issue #5, vaihe 4, spe
     Baltic Demo Trading Oy (spec 8.2): FI→EE FTL 900 / FI 33xxx→EE 980,
       FI→LV 10xx FTL 1250, FI→LT FTL 1400 (2025) / 1450 (2026-);
       200 sopimus 22 %, 230 billed=false, 510 pass_through +5 %.
-  migrate_customer_pricing.py + app.migrate_db() (idempotentti).
+  Demodata: init_db.seed_reference_demo() (reset_demo).
 
 fuel_rates: ⚠️ VANHENTUNUT — vain siirron lähde, koodi ei lue tai kirjoita sitä
   id, valid_from, valid_to, multiplier (init_db siemen: 5 kk tammi-touko 2026)
@@ -133,7 +162,7 @@ fuel_rates: ⚠️ VANHENTUNUT — vain siirron lähde, koodi ei lue tai kirjoit
   Hallitaan edelleen Hallinta-osiossa (⛽ Polttoainekerroin) /api/fuel-rates-kautta.
 
 trailers: (12 kpl Demo Trailer Leasing Oy)
-  plate_number, identifier, trailer_type, leasing_rate, rental_rate, status
+  plate_number, identifier, trailer_type, leasing_rate_cents, rental_rate_cents, status
   Tyypit: Umpikaappi (42/65€), Sivuaukeava (45/70€),
           Umpikaappi 2-koneinen (43/67€), Pressutrailer (35/54€), Megatrailer (38/59€)
   ✅ VALMIS (Feature 7A):
@@ -184,11 +213,11 @@ country_restrictions: ✅ VALMIS
 
 km_rates: ✅ VALMIS
   id, valid_from, valid_to,
-  domestic_rate (€/km, koodi 210),
-  continent_rate (€/km, koodi 220)
+  domestic_rate_e4 (€/km ×10 000, koodi 210),
+  continent_rate_e4 (€/km ×10 000, koodi 220)
 
 ferry_rates: ── TULOSSA ──
-  id, route, price, valid_from, valid_to
+  id, route, price_cents, valid_from, valid_to
   (nykyinen kovakoodaus → tietokantaan)
 
 settings: ── TULOSSA ──
@@ -206,8 +235,8 @@ init_db.py sisältää demodatan (issue #14):
   (carriers 6kpl, trailers 12kpl, customers 8kpl)
 
 PUHDAS DEMOKANTA: cd backend && python reset_demo.py [polku.db]
-  Poistaa kantatiedoston ja ajaa: create_schema + seed_demo_data + kaikki
-  migrate_*.py + app.migrate_db(). Kohde: argumentti > FREIGHT_DB_PATH > backend/freight.db.
+  Poistaa kantatiedoston ja ajaa: alembic upgrade head + seed_demo_data
+  (perusdata + viitedemodata). Kohde: argumentti > FREIGHT_DB_PATH > backend/freight.db.
   app.migrate_db() ajetaan vain käynnistyksessä (python app.py), ei importissa.
   Testit: conftest ohjaa FREIGHT_DB_PATH:n tmp-hakemistoon ja session-vartija
   varmistaa ettei backend/freight.db muutu (tests/test_db_path.py).

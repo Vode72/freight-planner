@@ -30,25 +30,66 @@ Kirjautuminen: `demo` / `freight2024`
 
 - Polku: ympäristömuuttuja `FREIGHT_DB_PATH`, oletus `backend/freight.db` (`db_config.get_db_path()`).
 - `freight.db` **ei ole versionhallinnassa** — luo se komennolla `python reset_demo.py [polku]`.
-  Skripti poistaa kantatiedoston ja ajaa alla olevat vaiheet + `app.migrate_db()`.
+  Skripti poistaa kantatiedoston, ajaa `alembic upgrade head` ja lisää demodatan
+  (`init_db.seed_demo_data()`: 7 trippiä, 12 orderia, 50 kustannusriviä, katteet 8–20 %,
+  maarajoitukset, terminaalit, km-/lauttahinnat, lisähinnat, asiakashinnasto).
 - Testit eivät koske `backend/freight.db`:hen: `conftest.py` ohjaa `FREIGHT_DB_PATH`:n
   tmp-hakemistoon ja session-vartija tarkistaa, ettei tiedosto muutu.
 
-`reset_demo.py` ajaa nämä järjestyksessä (yksittäin ajettavissa `backend/`-hakemistossa):
+### Migraatiot (Alembic)
 
-| Skripti | Luo |
+Skeeman **ainoa lähde** ovat revisiot `backend/migrations/versions/` (`render_as_batch=True`).
+
+```bash
+cd backend
+alembic upgrade head                    # FREIGHT_DB_PATH / backend/freight.db
+alembic -x db=polku.db upgrade head     # kohde annettuna
+alembic current
+alembic revision -m "kuvaus"            # uusi skeemamuutos
+```
+
+| Revisio | Sisältö |
 |---|---|
-| `python init_db.py` | Perustaulut + demodataa (7 trippiä, 12 orderia, 50 kustannusriviä, katteet 8–20 %) |
-| `python migrate_restrictions.py` | country_restrictions, terminals, trips.tail_lift_unloading |
-| `python migrate_hallinta.py` | trailer_maintenance, km_rates, ferry_rates, trailerin huoltosarakkeet |
-| `python migrate_settings.py` | settings (yritystiedot + hälytyskonfiguraatio) |
-| `python migrate_services.py` | services (palvelukoodisto) + vanhojen koodien yhdistäminen 401→400, 831→830 |
-| `python migrate_surcharges.py` | surcharge_rates (lisähinnat) + demodata tyhjään tauluun + fuel_rates → surcharge_rates (200) |
-| `python migrate_customer_pricing.py` | customer_rate_cards + customer_billing_rules + demodata (Nordic Demo Plastics Oy, Baltic Demo Trading Oy) |
+| `0001_baseline` | Skeema sellaisenaan kuin se oli ennen Alembicia. Ei muuta dataa; olemassa olevaan kantaan lisää vain puuttuvat taulut/sarakkeet |
+| `0002_reference_data` | Palvelukoodisto + 401→400, 831→830, oletusasetukset, fuel_rates → surcharge_rates (vanhat kannat) |
+| `0003_money_integer` | REAL-rahasarakkeet → INTEGER (`*_cents`, `*_e4`), muunnos Decimalina, downgrade mukana |
 
-`app.py` ajaa käynnistyessään (`python app.py`, ei importissa) `migrate_db()` joka lisää FEC-timestampit automaattisesti
-jos niitä ei vielä ole, sekä palvelukoodiston (`services.py`), lisähintojen (`surcharges.py`) ja asiakashinnoittelun (`customer_pricing.py`) migraation
-(idempotent, turvallinen uudelleenajoon).
+- Koko upgrade on yksi transaktio: virhe ei jätä kantaa puolitiehen.
+- Koodista: `db_migrate.upgrade_db(polku)` tai `upgrade_connection(conn)` (myös muistikanta).
+  `init_db.create_schema(conn)` = upgrade head. Jokaisen upgraden jälkeen palvelukoodisto
+  synkronoidaan `services.SERVICES`-listasta.
+- `app.py` ajaa käynnistyessään (`python app.py`, ei importissa) `migrate_db()` = upgrade head.
+- `migrate_*.py` ovat ohuita yhteensopivuuskääreitä (`upgrade head`), eivät lisää demodataa.
+- **Demodata ei kuulu migraatioihin.** Valmiita revisioita ei muokata — muutos = uusi revisio.
+
+### Rahamuoto
+
+**Kanta: INTEGER kiinteällä mittakaavalla. Laskenta: `Decimal`. API: euroina numeroina.**
+`backend/money.py` on ainoa paikka, jossa raha muunnetaan muodosta toiseen.
+
+| Mittakaava | Pääte | Käyttö | Esimerkki |
+|---|---|---|---|
+| ×100 (sentit) | `*_cents` | summat, kiinteät hinnat, €/pv | 180,00 € → `18000` |
+| ×10 000 | `*_e4` | yksikköhinnat (€/km, €/100 kg) ja prosentit | 12,345 % → `123450`, 1,85 €/km → `18500` |
+
+Sarakkeet: `costs.amount_cents`, `trailers.leasing_rate_cents/rental_rate_cents`, `ferry_rates.price_cents`,
+`km_rates.domestic_rate_e4/continent_rate_e4`, `surcharge_rates.rate_e4/min_amount_cents/max_amount_cents`,
+`customer_rate_cards.freight_price_cents`, `customer_billing_rules.rate_e4`.
+
+Miksi kokonaisluvut eikä Decimal kannassa:
+- SQLitessä ei ole desimaalityyppiä: `DECIMAL`/`NUMERIC` tallentuu REALina → sama float-ongelma.
+- Decimal tekstinä rikkoisi `SUM()`-, vertailu- ja `CHECK`-lausekkeet. Kokonaisluvuilla
+  `SUM()` on tarkka suoraan SQL:ssä (dashboardit summaavat kannassa).
+- Sarakkeen pääte kertoo mittakaavan, ja uudelleennimeäminen kaataa unohtuneen kyselyn heti
+  eikä palauta hiljaa satakertaista summaa. `CHECK (typeof(x) = 'integer')` estää floatit.
+
+Säännöt:
+- Ei `float()`:ia eikä `round()`:ia rahalaskennassa — `money.round_money()` (ROUND_HALF_UP),
+  `money.total()`, `money.percent_of()`. Testi `test_no_float_in_money_code` valvoo tätä.
+- Rivit kannasta: `money.row_from_db(taulu, rivi)` → API-kentät Decimalina; kantaan:
+  `money.values_to_db(taulu, data)`. Syöte: `money.parse_field()` (numero tai "12,50"; virhe → 400).
+- `app.MoneyJSONProvider` muuntaa Decimalin JSON-numeroksi (vain serialisointi).
+- Frontend lähettää rahasyötteet merkkijonoina (ei `parseFloat`).
 
 ---
 
@@ -78,19 +119,20 @@ freight-planner/
 │   ├── services.py               # Palvelukoodisto (SERVICES) + migraatiofunktiot
 │   ├── surcharges.py             # Lisähinnat: calculate_surcharge, derive_trade_type, demodata
 │   ├── customer_pricing.py       # Asiakashinnasto + lisäsäännöt: find_rate_card, get_billing_rule
+│   ├── money.py                  # Rahamuunnokset: Decimal ↔ *_cents / *_e4 ↔ API
 │   ├── db_config.py              # get_db_path(): FREIGHT_DB_PATH / backend/freight.db
+│   ├── db_migrate.py             # Alembic koodista: upgrade_db / upgrade_connection
+│   ├── alembic.ini
+│   ├── migrations/               # Alembic: env.py + versions/0001–0003
 │   ├── reset_demo.py             # Puhdas demokanta yhdellä komennolla
-│   ├── init_db.py                # create_schema() + seed_demo_data() + reset_db()
-│   ├── migrate_restrictions.py   # country_restrictions, terminals
-│   ├── migrate_hallinta.py       # trailer_maintenance, km_rates, ferry_rates
-│   ├── migrate_settings.py       # settings-taulu
-│   ├── migrate_services.py       # services-taulu + 401→400, 831→830
-│   ├── migrate_surcharges.py     # surcharge_rates-taulu + demodata
-│   ├── migrate_customer_pricing.py # customer_rate_cards, customer_billing_rules + demodata
+│   ├── init_db.py                # create_schema() (= upgrade head) + seed_demo_data() + reset_db()
+│   ├── migrate_*.py              # Yhteensopivuuskääreet: alembic upgrade head
 │   ├── requirements.txt
 │   ├── pytest.ini
 │   └── tests/
-│       ├── conftest.py           # Testifixturet (tmp_path-kanta)
+│       ├── conftest.py           # Testifixturet (tmp_path-kanta, Alembic + demodata)
+│       ├── test_alembic.py       # Migraatiot: tyhjä/vanha kanta, rahamuunnos, downgrade, rollback, CLI
+│       ├── test_money.py         # Rahapyöristys (0,1 + 0,2), Decimal ↔ sentit, API-muoto
 │       ├── test_id_gen.py        # ID-generoinnin testit
 │       ├── test_services.py      # Palvelukoodiston ja migraation testit
 │       ├── test_surcharges.py    # Lisähintojen laskenta, hakujärjestys, voimassaolo, CRUD
@@ -161,7 +203,7 @@ postinumeroalueosuma (postinumeron alku) ennen pelkkää maata, pidempi alue voi
 Asiakkaan poisto poistaa myös hinnaston ja säännöt.
 
 **Polttoainelisä** (spec 7.5) on `surcharge_rates`-taulussa: 200 / revenue / percent, kohdistus tyhjä.
-`migrate_fuel_rates()` siirsi `fuel_rates`-rivit kertaluonteisesti (`rate = round((m − 1) × 100, 4)`,
+`migrate_fuel_rates()` siirsi `fuel_rates`-rivit kertaluonteisesti (`rate = (m − 1) × 100`, Decimal, 4 desimaalia,
 kerroin ≤ 1 ohitetaan, merkintä `schema_migrations`-tauluun). `fuel_rates`-taulua ei enää käytetä
 koodissa (poisto UI-vaiheessa). `/api/fuel-rates` on yhteensopivuuskerros FuelRateManagerille:
 sama vastausmuoto, `multiplier = 1 + rate / 100`.
