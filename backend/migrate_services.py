@@ -1,17 +1,14 @@
-import sqlite3
+"""Yhteensopivuuskääre: ajaa Alembic-migraatiot (alembic upgrade head).
 
-from services import SERVICES, run_services_migration
+Skeema ja viitedata ovat migrations/versions-revisioissa, demodata
+init_db.seed_demo_data():ssa (python reset_demo.py).
+"""
+from db_migrate import upgrade_db
 
 
 def run_migration(db_path):
-    conn = sqlite3.connect(db_path)
-    changed = run_services_migration(conn)
-    conn.commit()
-    conn.close()
-    print(
-        f"migrate_services.py valmis — {len(SERVICES)} palvelukoodia, "
-        f"{changed} costs-riviä migroitu (401→400, 831→830)."
-    )
+    upgrade_db(db_path)
+    print(f"{__name__}: alembic upgrade head valmis ({db_path}).")
 
 
 if __name__ == "__main__":

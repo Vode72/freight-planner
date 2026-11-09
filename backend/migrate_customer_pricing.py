@@ -1,16 +1,14 @@
-import sqlite3
+"""Yhteensopivuuskääre: ajaa Alembic-migraatiot (alembic upgrade head).
 
-from customer_pricing import ensure_customer_pricing_tables, seed_customer_pricing
+Skeema ja viitedata ovat migrations/versions-revisioissa, demodata
+init_db.seed_demo_data():ssa (python reset_demo.py).
+"""
+from db_migrate import upgrade_db
 
 
 def run_migration(db_path):
-    conn = sqlite3.connect(db_path)
-    ensure_customer_pricing_tables(conn)
-    cards, rules = seed_customer_pricing(conn)
-    conn.commit()
-    conn.close()
-    print(f"migrate_customer_pricing.py valmis — customer_rate_cards ja "
-          f"customer_billing_rules, {cards} hinnastoriviä ja {rules} lisäsääntöä lisätty.")
+    upgrade_db(db_path)
+    print(f"{__name__}: alembic upgrade head valmis ({db_path}).")
 
 
 if __name__ == "__main__":

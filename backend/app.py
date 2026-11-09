@@ -4,15 +4,14 @@ from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-from services import run_services_migration
 from surcharges import (
-    run_surcharges_migration, validate_surcharge_payload, find_overlap,
+    validate_surcharge_payload, find_overlap,
     SURCHARGE_COLUMNS, calculate_surcharge, select_rate,
     FUEL_SERVICE_CODE, FUEL_COST_TYPE, FUEL_RATE_TYPE, FUEL_ROW_FILTER,
     multiplier_to_rate, rate_to_multiplier, fuel_row_as_legacy,
 )
 from customer_pricing import (
-    run_customer_pricing_migration, delete_customer_pricing,
+    delete_customer_pricing,
     validate_rate_card_payload, validate_billing_rule_payload,
     find_rate_card_overlap, find_billing_rule_overlap,
     billing_rule_as_dict, RATE_CARD_COLUMNS, BILLING_RULE_COLUMNS,
@@ -123,28 +122,17 @@ def get_db_connection():
 
 
 def migrate_db(db_path=None):
-    """Idempotentti käynnistysmigraatio. Ajetaan vain käynnistyksessä,
-    ei moduulin importissa (testit ja skriptit eivät koske oikeaan kantaan)."""
+    """Käynnistysmigraatio: alembic upgrade head + palvelukoodiston synkronointi.
+
+    Ajetaan vain käynnistyksessä, ei moduulin importissa (testit ja skriptit
+    eivät koske oikeaan kantaan). Puuttuvaa kantaa ei luoda — se tehdään
+    komennolla python reset_demo.py.
+    """
     db_path = db_path or DB_NAME
     if not os.path.exists(db_path):
         return
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    existing = {row[1] for row in conn.execute("PRAGMA table_info(trips)").fetchall()}
-    fec_cols = ["loading_started_at", "loading_completed_at",
-                "delivery_started_at", "delivery_completed_at", "delivered_at"]
-    for col in fec_cols:
-        if col not in existing:
-            conn.execute(f"ALTER TABLE trips ADD COLUMN {col} TEXT")
-    # Palvelukoodisto + koodien yhtenäistäminen (401→400, 831→830)
-    run_services_migration(conn)
-    # Lisähinnat (surcharge_rates) + demodata tyhjään tauluun
-    run_surcharges_migration(conn)
-    # Asiakashinnasto + lisäsäännöt + demodata tyhjiin tauluihin
-    run_customer_pricing_migration(conn)
-    conn.commit()
-    conn.close()
-
+    from db_migrate import upgrade_db
+    upgrade_db(db_path)
 
 
 def calculate_loading_meters(width, length, quantity):
