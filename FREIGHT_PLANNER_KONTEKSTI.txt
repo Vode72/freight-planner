@@ -932,6 +932,10 @@ VETÄJÄREKISTERI OSA 2 — SUUNNITELMALUONNOS (ODOTTAA HYVÄKSYNTÄÄ, ei kooda
   Nyt rikki ilman osaa 2: CarrierList, TripForm, HallintaKalusto/Vetäjät kutsuvat poistettua
   /api/trucks; TrailerForm vaatii rekisterin (vaihtokoria ei voi luoda UI:sta).
   0. ENSIN (ennen komponentteja, CI vihreäksi): #26 + frontend-CI-job (npm ci, build, testit).
+     TEHTY 11.11.2026: lock synkkaan, 4 ESLint-varoitusta korjattu (AddToTripModal ja DriverPage:
+     haku efektin sisään, ajokerrat ennallaan; FuelRateManager eslint-disable + perustelu;
+     CustomerForm grid2 pois), .github/workflows/frontend.yml (npm ci → ESLint --max-warnings=0 →
+     CI=true npm test → CI=false build). Komponentit vasta kun CI vihreä.
      Selvitys 11.11.2026 (node 22.23 / npm 10.9, Linux, repon ulkopuolinen kopio):
      - npm ci kaatuu: lock-tiedostosta puuttuu yksi rivi (tailwindcss/node_modules/yaml@2.9.1);
        npm install korjaa, eikä muuta lockissa mitään muuta → lock uudelleen + commit.

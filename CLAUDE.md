@@ -116,12 +116,22 @@ cd backend
 pytest tests/ -v
 ```
 
-Frontend:
+Frontend (samat vaiheet kuin CI:ssä, `.github/workflows/frontend.yml`):
 
 ```bash
 cd frontend
-npm test
+npm ci
+npx eslint --ext .js,.jsx --max-warnings=0 src   # omat varoitukset = virhe
+CI=true npm test -- --watchAll=false             # CI=true: ei watch-tilaa
+CI=false npm run build                           # CI=false vain buildissa
 ```
+
+`CI=false` buildissa, koska react-scripts tekisi muuten virheen myös riippuvuuden
+webpack-varoituksesta (`react-datepicker`: "Critical dependency: the request of a dependency
+is an expression"). Omat lint-varoitukset estetään ESLint-vaiheessa.
+Tarkoituksella pois jätetty hook-riippuvuus: `// eslint-disable-next-line react-hooks/exhaustive-deps`
++ perustelu kommenttina (ei pakotettua `useCallback`ia). Huom: `useToast()` palauttaa uuden olion
+joka renderöinnillä, joten sitä ei voi käyttää efektin riippuvuutena.
 
 ---
 
