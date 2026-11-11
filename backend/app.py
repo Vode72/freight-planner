@@ -683,8 +683,16 @@ def update_tractor(tractor_id):
         conn.execute(
             f"UPDATE tractors SET {', '.join(f'{f} = ?' for f in fields)} WHERE id = ?",
             [values[f] for f in fields] + [tractor_id])
+        # Rekisterin korjaus päivittää truck_plate-kopion laskuttamattomille
+        # keikoille; laskutetut pysyvät jäädytettyinä (dokumentit annettu).
+        updated_trips = 0
+        if values["registration_number"] != current["registration_number"]:
+            updated_trips = conn.execute(
+                "UPDATE trips SET truck_plate = ? WHERE tractor_id = ? AND status <> 'Laskutettu'",
+                (values["registration_number"], tractor_id)).rowcount
         conn.commit()
-        return jsonify({"message": "Vetäjä päivitetty", "tractor": _get_tractor(conn, tractor_id)})
+        return jsonify({"message": "Vetäjä päivitetty", "tractor": _get_tractor(conn, tractor_id),
+                        "updated_trips": updated_trips})
     finally:
         conn.close()
 

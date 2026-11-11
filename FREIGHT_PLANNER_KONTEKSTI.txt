@@ -60,7 +60,8 @@ trips:
   trip_id (TRP-2026-001), status, reitti (first_pickup / trip_end),
   transport_type, carrier_id, trailer_id (valinnainen), trailer_type,
   tractor_id ✅ (nullable FK → tractors; tractor.carrier_id = trip.carrier_id),
-  truck_plate ✅ (palvelimen täyttämä kopio vetäjän rekisteristä valintahetkellä — dokumentit),
+  truck_plate ✅ (palvelimen täyttämä kopio vetäjän rekisteristä; rekisterin korjaus päivittää
+    laskuttamattomat keikat, laskutetut jäädytetty — dokumentit),
   loading_date/time, delivery_date/time, fixed_delivery_date,
   ferry_route, ferry_departure, ferry_arrival,
   adr, tail_lift, temperature_controlled,

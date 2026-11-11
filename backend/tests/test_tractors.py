@@ -428,18 +428,54 @@ def test_truck_plate_is_server_snapshot(carriers):
     trip_id = resp.get_json()["id"]
     assert _trip(c, trip_id)["truck_plate"] == "SNP-001"  # asiakkaan arvo ohitetaan
 
-    # Vetäjän rekisterin korjaus ei muuta keikan kopiota (dokumentit)
-    c.put(f"/api/tractors/{first['id']}", json={"registration_number": "SNP-001X"})
+    # Saman vetäjän uudelleentallennus keikalle ei muuta kopiota
     c.put(f"/api/trips/{trip_id}", json=_trip_payload(carrier_id=alfa, tractor_id=first["id"]))
-    trip = _trip(c, trip_id)
-    assert trip["truck_plate"] == "SNP-001"
-    assert trip["tractor_registration"] == "SNP-001X"
+    assert _trip(c, trip_id)["truck_plate"] == "SNP-001"
 
     # Vetäjän vaihto päivittää kopion, vetäjän poisto tyhjentää sen
     c.put(f"/api/trips/{trip_id}", json=_trip_payload(carrier_id=alfa, tractor_id=second["id"]))
     assert _trip(c, trip_id)["truck_plate"] == "SNP-002"
     c.put(f"/api/trips/{trip_id}", json=_trip_payload(carrier_id=alfa, tractor_id=None))
     assert _trip(c, trip_id)["truck_plate"] is None
+
+
+def test_registration_change_updates_open_trips(carriers):
+    """Rekisterin korjaus päivittää kopion kaikille laskuttamattomille keikoille."""
+    c, db_path, alfa, _ = carriers
+    tractor = _tractor(c, alfa, "FIX-001")
+    trip_ids = [_create_trip(c, carrier_id=alfa, tractor_id=tractor["id"]).get_json()["id"]
+                for _ in range(3)]
+    for trip_id, status in zip(trip_ids, ["Suunniteltu", "Vahvistettu", "Toimitettu"]):
+        _set_trip_status(db_path, trip_id, status)
+    other = _create_trip(c, carrier_id=alfa).get_json()["id"]  # ei vetäjää: ei muutu
+
+    resp = c.put(f"/api/tractors/{tractor['id']}", json={"registration_number": "fix-001b"})
+    assert resp.status_code == 200
+    assert resp.get_json()["updated_trips"] == 3
+    for trip_id in trip_ids:
+        trip = _trip(c, trip_id)
+        assert (trip["truck_plate"], trip["tractor_registration"]) == ("FIX-001B", "FIX-001B")
+    assert _trip(c, other)["truck_plate"] is None
+
+    # Muu muutos kuin rekisteri ei koske keikkoihin
+    resp = c.put(f"/api/tractors/{tractor['id']}", json={"status": "huollossa"})
+    assert resp.get_json()["updated_trips"] == 0
+
+
+def test_registration_change_keeps_invoiced_trips_frozen(carriers):
+    """Laskutetun keikan kopio on jäädytetty: dokumentit on annettu vanhalla rekisterillä."""
+    c, db_path, alfa, _ = carriers
+    tractor = _tractor(c, alfa, "FRZ-001")
+    invoiced = _create_trip(c, carrier_id=alfa, tractor_id=tractor["id"]).get_json()["id"]
+    open_trip = _create_trip(c, carrier_id=alfa, tractor_id=tractor["id"]).get_json()["id"]
+    _set_trip_status(db_path, invoiced, "Laskutettu")
+
+    resp = c.put(f"/api/tractors/{tractor['id']}", json={"registration_number": "FRZ-002"})
+    assert resp.get_json()["updated_trips"] == 1
+    frozen = _trip(c, invoiced)
+    assert frozen["truck_plate"] == "FRZ-001"
+    assert frozen["tractor_registration"] == "FRZ-002"
+    assert _trip(c, open_trip)["truck_plate"] == "FRZ-002"
 
 
 def test_put_without_tractor_key_keeps_tractor(carriers):

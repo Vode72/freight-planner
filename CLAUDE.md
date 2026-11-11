@@ -249,11 +249,14 @@ Tripillä ei carrieria → carrier asetetaan vetäjältä. Poistettua vetäjää
 PUT ilman `tractor_id`-avainta säilyttää vetäjän, `null` poistaa sen. Vetäjän carrierin vaihto → 409,
 jos se on laskuttamattomalla tripillä. Traileri on tripillä valinnainen.
 
-**`trips.truck_plate` on palvelimen täyttämä snapshot**, ei asiakkaan syöte. Peruste: dokumentit
-(Transport Order, CMR, lasku) on annettu sillä rekisterinumerolla, joka keikalla oli valintahetkellä —
-jos vetäjän rekisteri myöhemmin korjataan tai vetäjä siirtyy toiselle carrierille, valmiin keikan
-dokumenttitieto ei saa muuttua. Siksi: vetäjä valitaan → kopio rekisteristä; sama vetäjä → kopio säilyy;
-vetäjä vaihtuu → uusi kopio; vetäjä poistetaan keikalta → NULL. Nykyinen rekisteri tulee kyselyissä
+**`trips.truck_plate` on palvelimen täyttämä snapshot**, ei asiakkaan syöte. Peruste: laskutetun
+keikan dokumentit (Transport Order, CMR, lasku) on annettu sillä rekisterinumerolla, joka keikalla oli —
+jos vetäjän rekisteri myöhemmin korjataan tai vetäjä siirtyy toiselle carrierille, laskutetun keikan
+dokumenttitieto ei saa muuttua. Laskuttamattomilla keikoilla kopio seuraa vetäjää, jotta tulevat
+dokumentit tulostuvat korjatulla rekisterillä. Siksi: vetäjä valitaan → kopio rekisteristä; sama vetäjä →
+kopio säilyy; vetäjä vaihtuu → uusi kopio; vetäjä poistetaan keikalta → NULL; vetäjän rekisteriä
+muokataan (`PUT /api/tractors/:id`) → kopio päivitetään kaikille sen laskuttamattomille keikoille
+(vastauksessa `updated_trips`), laskutetut pysyvät jäädytettyinä. Nykyinen rekisteri tulee kyselyissä
 kentässä `tractor_registration`. Vanhat keikat, joita 0004 ei voinut linkittää (rekisteri/carrier ei
 täsmännyt), säilyttävät tekstinsä.
 
