@@ -37,46 +37,48 @@ function AddToTripModal({ order, onClose, onSuccess, onCreateNewTrip }) {
   const [adding, setAdding] = useState(null);
   const [matchCache, setMatchCache] = useState({});
 
+  // order tulee App.js:n tilasta: sama olio niin kauan kuin modaali on auki
+  // (suljettaessa modaali puretaan), joten haku ajetaan kerran per avaus.
   useEffect(() => {
-    fetchActiveTrips();
-  }, []);
+    const fetchActiveTrips = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch("http://127.0.0.1:5000/api/trips");
+        const data = await response.json();
+        const active = data.filter(t =>
+          t.status !== "Laskutettu" && t.status !== "Toimitettu"
+        );
 
-  const fetchActiveTrips = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch("http://127.0.0.1:5000/api/trips");
-      const data = await response.json();
-      const active = data.filter(t =>
-        t.status !== "Laskutettu" && t.status !== "Toimitettu"
-      );
+        const matches = {};
+        await Promise.all(active.map(async (trip) => {
+          const params = new URLSearchParams({
+            order_country: order.unloading_point_country || "",
+            order_zip: order.unloading_point_zip || "",
+            trip_country: trip.trip_end_country || "",
+            trip_zip: trip.trip_end_zip || ""
+          });
+          const res = await fetch(`http://127.0.0.1:5000/api/route-match?${params}`);
+          const matchData = await res.json();
+          matches[trip.id] = matchData.match;
+        }));
 
-      const matches = {};
-      await Promise.all(active.map(async (trip) => {
-        const params = new URLSearchParams({
-          order_country: order.unloading_point_country || "",
-          order_zip: order.unloading_point_zip || "",
-          trip_country: trip.trip_end_country || "",
-          trip_zip: trip.trip_end_zip || ""
+        setMatchCache(matches);
+
+        const sorted = [...active].sort((a, b) => {
+          const order = { good: 0, warning: 1, bad: 2 };
+          return (order[matches[a.id]] || 1) - (order[matches[b.id]] || 1);
         });
-        const res = await fetch(`http://127.0.0.1:5000/api/route-match?${params}`);
-        const matchData = await res.json();
-        matches[trip.id] = matchData.match;
-      }));
 
-      setMatchCache(matches);
+        setTrips(sorted);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-      const sorted = [...active].sort((a, b) => {
-        const order = { good: 0, warning: 1, bad: 2 };
-        return (order[matches[a.id]] || 1) - (order[matches[b.id]] || 1);
-      });
-
-      setTrips(sorted);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    fetchActiveTrips();
+  }, [order]);
 
   // ── KORJATTU handleAddToTrip — saa trip-objektin, ei erillistä tripRef ─
   const handleAddToTrip = async (trip) => {
