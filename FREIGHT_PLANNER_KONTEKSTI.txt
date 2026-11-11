@@ -1,5 +1,5 @@
 FREIGHT PLANNER — PROJEKTIN KONTEKSTI VS CODE CLAUDELLE
-Päivitetty: 09.11.2026 (v13)
+Päivitetty: 11.11.2026 (v14)
 ============================================================
 
 ROOLI:
@@ -28,6 +28,10 @@ Alembic: backend/alembic.ini + backend/migrations/ (render_as_batch=True)
   0002_reference_data palvelukoodisto + 401/831→400/830, oletusasetukset,
                       fuel_rates → surcharge_rates (vanhat kannat)
   0003_money_integer  REAL-rahasarakkeet → INTEGER (*_cents / *_e4)
+  0004_tractors       vetäjärekisteri: tractors-taulu (trucks siirretty + pudotettu),
+                      ominaisuussarakkeet trailereille, trips.tractor_id
+  Varmuuskopio: upgrade_db() ja alembic-CLI kopioivat olemassa olevan, migroimattoman
+  kannan ensin tiedostoon <kanta>.bak-<revisio>-<aikaleima> (db_migrate.backup_if_pending).
   Ajo: cd backend && alembic upgrade head  (tai -x db=polku)
   Koodista: db_migrate.upgrade_db(polku) / upgrade_connection(conn).
   init_db.create_schema(conn) = upgrade head. app.migrate_db() = upgrade head
@@ -54,7 +58,9 @@ TIETOKANTA — TAULUT
 
 trips:
   trip_id (TRP-2026-001), status, reitti (first_pickup / trip_end),
-  transport_type, carrier_id, trailer_id, trailer_type, truck_plate,
+  transport_type, carrier_id, trailer_id (valinnainen), trailer_type,
+  tractor_id ✅ (nullable FK → tractors; tractor.carrier_id = trip.carrier_id),
+  truck_plate ✅ (palvelimen täyttämä kopio vetäjän rekisteristä valintahetkellä — dokumentit),
   loading_date/time, delivery_date/time, fixed_delivery_date,
   ferry_route, ferry_departure, ferry_arrival,
   adr, tail_lift, temperature_controlled,
@@ -163,6 +169,9 @@ fuel_rates: ⚠️ VANHENTUNUT — vain siirron lähde, koodi ei lue tai kirjoit
 
 trailers: (12 kpl Demo Trailer Leasing Oy)
   plate_number, identifier, trailer_type, leasing_rate_cents, rental_rate_cents, status
+  ominaisuudet ✅ (0004): adr, temperature_controlled, tail_lift, crane (0/1, sama rakenne
+    kuin tractors; API: features-objekti). Lämpösäätö oletuksena thermo-tyypeille.
+  Pikaluonti: POST /api/trailers {plate_number, trailer_type} → identifier = rekisteri.
   Tyypit: Umpikaappi (42/65€), Sivuaukeava (45/70€),
           Umpikaappi 2-koneinen (43/67€), Pressutrailer (35/54€), Megatrailer (38/59€)
   ✅ VALMIS (Feature 7A):
@@ -184,10 +193,20 @@ carriers: (6 kuljetusyhtiötä — 3 FI, 3 EU)
   name, country, city, business_id, contact_person, phone
   ── TULOSSA: vat_number ──
 
-trucks: (12 vetäjää — 2 per yhtiö)
-  plate_number, carrier_id, status
-  Tunnukset: NRF-001/002, BLR-001/002, PHK-001/002,
-             ETR-001/002, CTC-001/002, SCL-001/002
+tractors: ✅ VALMIS (vetäjärekisteri, Alembic 0004 — korvasi trucks-taulun)
+  registration_number (uniikki, isot kirjaimet, COLLATE NOCASE), carrier_id (NOT NULL),
+  vehicle_type (vetoauto/kuorma-auto), make_model, emission_class (EURO III–VI, EEV),
+  status (aktiivinen/huollossa/poistettu),
+  max_weight (kg), max_ldm, max_volume (m³) — vain kuorma-autolle (CHECK),
+  adr, temperature_controlled, tail_lift, crane (0/1), notes, created_at
+  Logiikka ja koodistot: backend/equipment.py (FEATURES, validate_tractor, meta).
+  Demo: 12 vetoautoa NRF-001/002, BLR-001/002, PHK-001/002, ETR-001/002,
+        CTC-001/002, SCL-001/002 (PHK-002 huollossa, ETR-* ADR) +
+        2 kuorma-autoa NRF-101 (lämpö + takalaita), PHK-101 (nosturi). Mallit "Demo …".
+  Säännöt: tripin vetäjän carrier = tripin carrier (muuten 400); tripillä ei carrieria →
+    carrier vetäjältä; poistettua vetäjää ei voi valita; vetäjän carrierin vaihto 409,
+    jos laskuttamaton trip; käytetyn vetäjän poisto 409 (status poistettu tilalle);
+    kuljetusyhtiön poisto 409, jos sillä on vetäjiä (ei ketjupoistoa).
 
 customers: ✅ VALMIS
   name, address, country, zip, city,
@@ -342,10 +361,12 @@ Carriers:   GET /api/carriers
             POST /api/carriers
             PUT /api/carriers/:id
             DELETE /api/carriers/:id
-Trucks:     GET /api/trucks?carrier_id=
-            POST /api/trucks
-            PUT /api/trucks/:id
-            DELETE /api/trucks/:id
+Tractors:   GET /api/tractors?carrier_id=&vehicle_type=&status=&q=&include_removed=1
+            GET/PUT/DELETE /api/tractors/:id   (PUT osittainen)
+            POST /api/tractors   (pikaluonti: registration_number, carrier_id, vehicle_type;
+                                  vastaus {id, tractor}; varattu rekisteri → 409 + existing)
+            GET /api/equipment-meta  (ominaisuudet, tyypit, statukset, päästöluokat, trailerityypit)
+            /api/trucks POISTETTU (0004)
 Trips:      GET/POST /api/trips, GET/PUT/DELETE /api/trips/:id
             GET palauttaa total_weight, total_loading_meters, total_volume
             PUT /api/trips/:id/status
@@ -899,7 +920,12 @@ GIT-Tilanne
 GitHub: github.com/Vode72/freight-planner
 .gitignore: node_modules/, frontend/build/, __pycache__/ ja backend/freight.db jätetään pois
 (freight.db, build ja .pyc poistettu versionhallinnasta issuessa #14; historiaa ei siivottu)
-Viimeisin commit: Feature 7B — Asetukset-sivu (settings-taulu, yritystiedot, ilmoitukset)
+Viimeisin commit: Vetäjärekisteri osa 1 — Alembic 0004, equipment.py, /api/tractors, testit
+Vetäjärekisteri osa 2 (TULOSSA, frontend): HallintaKalusto Vetäjät-välilehti (TractorList/Form),
+  EquipmentFeatures, ResourcePicker ("hae tai luo" + pikalomake) TripFormiin,
+  CarrierList ja TripForm /api/trucks → /api/tractors (nyt rikki ilman osaa 2!),
+  TripDetail näyttää tractor_registration.
+Erillinen issue: kuorma-auto tripillä (traileri piiloon, kapasiteetti kuorma-autosta).
 
 ============================================================
 --- MYÖHEMMIN ---

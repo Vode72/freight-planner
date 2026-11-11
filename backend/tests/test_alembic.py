@@ -18,7 +18,7 @@ BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HEAD = ScriptDirectory.from_config(alembic_config()).get_current_head()
 
 EXPECTED_TABLES = {
-    "trips", "orders", "costs", "trailers", "carriers", "trucks", "customers",
+    "trips", "orders", "costs", "trailers", "carriers", "tractors", "customers",
     "fuel_rates", "services", "country_restrictions", "terminals",
     "trailer_maintenance", "km_rates", "ferry_rates", "settings",
     "surcharge_rates", "schema_migrations", "customer_rate_cards",
@@ -345,3 +345,125 @@ def test_money_column_rejects_float(tmp_path):
     conn.execute("INSERT INTO costs (trip_id, cost_code, description, amount_cents) "
                  "VALUES (1, '120', 'X', 1050)")
     conn.close()
+
+
+# ── 0004: vetäjärekisteri (trucks → tractors) ─────────────────────────
+
+def _db_at_0003(path):
+    """Kanta revisiossa 0003: vanha trucks-taulu, tripit truck_plate-tekstillä."""
+    conn = sqlite3.connect(path)
+    upgrade_connection(conn, "0003")
+    conn.executemany(
+        "INSERT INTO carriers (id, name, country, city) VALUES (?, ?, 'FI', 'Demola')",
+        [(1, "Demo Alfa Oy"), (2, "Demo Beta Oy")])
+    conn.executemany(
+        "INSERT INTO trucks (id, plate_number, carrier_id, status) VALUES (?, ?, ?, ?)",
+        [(1, "AAA-001", 1, "Vapaa"), (2, "aaa-002 ", 1, "Ajossa"),
+         (4, "BBB-001", 2, "Huollossa"), (5, "AAA-001", 1, "Vapaa")])  # 5 = saman carrierin tupla
+    conn.executemany(
+        "INSERT INTO trips (id, trip_id, status, carrier_id, truck_plate) VALUES (?, ?, ?, ?, ?)",
+        [(1, "TRP-M-1", "Suunniteltu", 1, "AAA-001"),
+         (2, "TRP-M-2", "Laskutettu", 1, "AAA-002"),      # normalisoitu osuma
+         (3, "TRP-M-3", "Vahvistettu", 1, "BBB-001"),     # eri carrier → ei linkkiä
+         (4, "TRP-M-4", "Suunniteltu", 2, None)])
+    conn.executemany(
+        "INSERT INTO trailers (id, plate_number, identifier, trailer_type) VALUES (?, ?, ?, ?)",
+        [(1, "T-1", "T-1", "Umpikaappi"), (2, "T-2", "T-2", "Megatrailer"),
+         (3, "T-3", "T-3", "Sivuaukeava")])
+    conn.commit()
+    return conn
+
+
+def test_tractors_migration_moves_trucks(tmp_path):
+    conn = _db_at_0003(str(tmp_path / "m4.db"))
+    upgrade_connection(conn)
+    assert current_revision(conn) == HEAD
+    assert "trucks" not in _tables(conn)
+    assert conn.execute(
+        "SELECT id, registration_number, carrier_id, vehicle_type, status FROM tractors ORDER BY id"
+    ).fetchall() == [
+        (1, "AAA-001", 1, "vetoauto", "aktiivinen"),
+        (2, "AAA-002", 1, "vetoauto", "aktiivinen"),
+        (4, "BBB-001", 2, "vetoauto", "huollossa"),
+    ]
+    assert conn.execute("SELECT id, tractor_id, truck_plate FROM trips ORDER BY id").fetchall() == [
+        (1, 1, "AAA-001"), (2, 2, "AAA-002"), (3, None, "BBB-001"), (4, None, None)]
+    assert conn.execute(
+        "SELECT id, temperature_controlled, adr, tail_lift, crane FROM trailers ORDER BY id"
+    ).fetchall() == [(1, 1, 0, 0, 0), (2, 0, 0, 0, 0), (3, 1, 0, 0, 0)]
+    # AUTOINCREMENT jatkuu trucks-taulun laskurista (tupla id 5 ei palaa käyttöön)
+    new_id = conn.execute(
+        "INSERT INTO tractors (registration_number, carrier_id) VALUES ('NEW-1', 1)").lastrowid
+    assert new_id == 6
+    indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    assert {"idx_tractors_carrier", "idx_trips_tractor"} <= indexes
+    conn.close()
+
+
+def test_tractors_migration_rejects_plate_on_two_carriers(tmp_path):
+    conn = _db_at_0003(str(tmp_path / "conflict.db"))
+    conn.execute("INSERT INTO trucks (plate_number, carrier_id) VALUES ('bbb-001', 1)")
+    conn.commit()
+    with pytest.raises(ValueError, match="BBB-001"):
+        upgrade_connection(conn)
+    assert current_revision(conn) == "0003"
+    assert "trucks" in _tables(conn) and "tractors" not in _tables(conn)
+    conn.close()
+
+
+def test_tractors_migration_downgrade_and_upgrade_again(tmp_path):
+    from db_migrate import downgrade_connection
+    conn = _db_at_0003(str(tmp_path / "m4.db"))
+    upgrade_connection(conn)
+    conn.execute("UPDATE tractors SET status = 'poistettu' WHERE id = 4")
+    conn.commit()
+    downgrade_connection(conn, "0003")
+    assert current_revision(conn) == "0003"
+    assert "tractors" not in _tables(conn)
+    assert "tractor_id" not in _types(conn, "trips")
+    assert not {"adr", "temperature_controlled", "tail_lift", "crane"} & set(_types(conn, "trailers"))
+    assert conn.execute("SELECT id, plate_number, carrier_id, status FROM trucks ORDER BY id").fetchall() == [
+        (1, "AAA-001", 1, "Vapaa"), (2, "AAA-002", 1, "Vapaa"), (4, "BBB-001", 2, "Poistettu")]
+    upgrade_connection(conn)
+    assert conn.execute("SELECT id, registration_number, status FROM tractors ORDER BY id").fetchall() == [
+        (1, "AAA-001", "aktiivinen"), (2, "AAA-002", "aktiivinen"), (4, "BBB-001", "poistettu")]
+    assert conn.execute("SELECT id, tractor_id FROM trips ORDER BY id").fetchall() == [
+        (1, 1), (2, 2), (3, None), (4, None)]
+    conn.close()
+
+
+# ── Varmuuskopio ennen migraatiota ────────────────────────────────────
+
+def _backups(tmp_path):
+    return sorted(p.name for p in tmp_path.iterdir() if ".bak-" in p.name)
+
+
+def test_upgrade_db_backs_up_pending_database(tmp_path):
+    path = str(tmp_path / "old.db")
+    _db_at_0003(path).close()
+    upgrade_db(path)
+    backups = _backups(tmp_path)
+    assert len(backups) == 1 and backups[0].startswith("old.db.bak-0003-")
+    backup = sqlite3.connect(str(tmp_path / backups[0]))
+    assert current_revision(backup) == "0003"
+    assert backup.execute("SELECT COUNT(*) FROM trucks").fetchone()[0] == 4
+    backup.close()
+    # Kanta on jo headissa: uutta kopiota ei tehdä
+    upgrade_db(path)
+    assert len(_backups(tmp_path)) == 1
+
+
+def test_upgrade_db_skips_backup_for_new_database(tmp_path):
+    upgrade_db(str(tmp_path / "new.db"))
+    assert _backups(tmp_path) == []
+
+
+def test_alembic_cli_backs_up_pending_database(tmp_path):
+    target = str(tmp_path / "cli-old.db")
+    _db_at_0003(target).close()
+    env = {k: v for k, v in os.environ.items() if k != db_config.DB_PATH_ENV}
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "-x", f"db={target}", "upgrade", "head"],
+        cwd=BACKEND_DIR, env=env, check=True, capture_output=True, text=True)
+    assert "Varmuuskopio ennen migraatiota" in result.stdout
+    assert [b for b in _backups(tmp_path) if b.startswith("cli-old.db.bak-0003-")]

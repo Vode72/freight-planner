@@ -110,7 +110,7 @@ def test_migrate_db_with_explicit_path(tmp_path):
 # ── reset_demo ────────────────────────────────────────────────────────
 
 EXPECTED_TABLES = {
-    "trips", "orders", "costs", "trailers", "carriers", "trucks", "customers",
+    "trips", "orders", "costs", "trailers", "carriers", "tractors", "customers",
     "country_restrictions", "terminals", "trailer_maintenance", "km_rates",
     "ferry_rates", "settings", "services", "surcharge_rates",
     "customer_rate_cards", "customer_billing_rules",

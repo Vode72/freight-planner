@@ -56,8 +56,13 @@ alembic revision -m "kuvaus"            # uusi skeemamuutos
 | `0001_baseline` | Skeema sellaisenaan kuin se oli ennen Alembicia. Ei muuta dataa; olemassa olevaan kantaan lisää vain puuttuvat taulut/sarakkeet |
 | `0002_reference_data` | Palvelukoodisto + 401→400, 831→830, oletusasetukset, fuel_rates → surcharge_rates (vanhat kannat) |
 | `0003_money_integer` | REAL-rahasarakkeet → INTEGER (`*_cents`, `*_e4`), muunnos Decimalina, downgrade mukana |
+| `0004_tractors` | Vetäjärekisteri `tractors` (trucks-rivit siirretään, taulu pudotetaan), ominaisuussarakkeet trailereille, `trips.tractor_id`, downgrade mukana |
 
 - Koko upgrade on yksi transaktio: virhe ei jätä kantaa puolitiehen.
+- **Varmuuskopio ennen migraatiota:** `upgrade_db()` (myös `app.migrate_db()`) ja `alembic`-CLI
+  kopioivat olemassa olevan kannan, jonka revisio ei ole head, ensin tiedostoon
+  `<kanta>.bak-<revisio>-<aikaleima>` (`db_migrate.backup_if_pending`, SQLiten backup-API).
+  Uutta/tyhjää kantaa ei kopioida. Kopiot ovat `.gitignore`ssa.
 - Koodista: `db_migrate.upgrade_db(polku)` tai `upgrade_connection(conn)` (myös muistikanta).
   `init_db.create_schema(conn)` = upgrade head. Jokaisen upgraden jälkeen palvelukoodisto
   synkronoidaan `services.SERVICES`-listasta.
@@ -123,10 +128,11 @@ freight-planner/
 │   ├── surcharges.py             # Lisähinnat: calculate_surcharge, derive_trade_type, demodata
 │   ├── customer_pricing.py       # Asiakashinnasto + lisäsäännöt: find_rate_card, get_billing_rule
 │   ├── money.py                  # Rahamuunnokset: Decimal ↔ *_cents / *_e4 ↔ API
+│   ├── equipment.py              # Kalusto: ominaisuudet (FEATURES), vetäjien koodistot ja validointi
 │   ├── db_config.py              # get_db_path(): FREIGHT_DB_PATH / backend/freight.db
 │   ├── db_migrate.py             # Alembic koodista: upgrade_db / upgrade_connection
 │   ├── alembic.ini
-│   ├── migrations/               # Alembic: env.py + versions/0001–0003
+│   ├── migrations/               # Alembic: env.py + versions/0001–0004
 │   ├── reset_demo.py             # Puhdas demokanta yhdellä komennolla
 │   ├── init_db.py                # create_schema() (= upgrade head) + seed_demo_data() + reset_db()
 │   ├── migrate_*.py              # Yhteensopivuuskääreet: alembic upgrade head
@@ -134,7 +140,8 @@ freight-planner/
 │   ├── pytest.ini
 │   └── tests/
 │       ├── conftest.py           # Testifixturet (tmp_path-kanta, Alembic + demodata)
-│       ├── test_alembic.py       # Migraatiot: tyhjä/vanha kanta, rahamuunnos, downgrade, rollback, CLI
+│       ├── test_alembic.py       # Migraatiot: tyhjä/vanha kanta, rahamuunnos, trucks→tractors, downgrade, rollback, CLI, varmuuskopio
+│       ├── test_tractors.py      # Vetäjät: CRUD, carrier-validointi, pikaluonti, ominaisuudet (myös trailerit)
 │       ├── test_money.py         # Rahapyöristys (0,1 + 0,2), Decimal ↔ sentit, API-muoto
 │       ├── test_id_gen.py        # ID-generoinnin testit
 │       ├── test_services.py      # Palvelukoodiston ja migraation testit
@@ -216,6 +223,39 @@ sama vastausmuoto, `multiplier = 1 + rate / 100`.
 - `cost`: kaikki muut
 
 **Statusketju**: Suunniteltu → Vahvistettu → Käynnissä → Toimitettu → Laskutettu
+
+---
+
+## Kalusto: vetäjät ja trailerit
+
+**Vetäjärekisteri** on `tractors`-taulussa (`/api/tractors`, CRUD; korvasi `trucks`-taulun ja `/api/trucks`:n).
+Koodistot ja validointi ovat `backend/equipment.py`:ssä (`GET /api/equipment-meta`).
+- `registration_number` uniikki: tallennetaan trimmattuna isoin kirjaimin, `UNIQUE COLLATE NOCASE`;
+  varattu rekisteri → 409 + `existing`-rivi (UI voi tarjota olemassa olevaa).
+- `vehicle_type` vetoauto / kuorma-auto; `max_weight` (kg), `max_ldm`, `max_volume` (m³) vain
+  kuorma-autolle (API 400 + `CHECK`). `status` aktiivinen / huollossa / poistettu (poistetut piilossa listasta).
+- POST palauttaa koko rivin (`{id, tractor}`): pikaluonti = `registration_number` + `carrier_id` + `vehicle_type`.
+  PUT on osittainen. Käytetyn vetäjän DELETE → 409 (aseta status poistettu); kuljetusyhtiön DELETE → 409,
+  jos sillä on vetäjiä (ei ketjupoistoa).
+
+**Ominaisuudet** (`adr`, `temperature_controlled`, `tail_lift`, `crane`) ovat samannimisiä 0/1-sarakkeita
+sekä `tractors`- että `trailers`-taulussa (samat nimet kuin trips/orders-lipuilla). API:ssa molemmilla
+`features: {"adr": false, …}`. Uusi ominaisuus = uusi Alembic-revisio + `equipment.FEATURES`.
+Trailerin pikaluonti: `plate_number` + `trailer_type` (identifier = rekisteri, lämpösäätö tyypin mukaan);
+trailereilla ei ole carrieria (leasing-pooli).
+
+**Tripin vetäjä** (`trips.tractor_id`, nullable): `tractor.carrier_id = trip.carrier_id`, muuten 400.
+Tripillä ei carrieria → carrier asetetaan vetäjältä. Poistettua vetäjää ei voi valita (jo valittu saa jäädä).
+PUT ilman `tractor_id`-avainta säilyttää vetäjän, `null` poistaa sen. Vetäjän carrierin vaihto → 409,
+jos se on laskuttamattomalla tripillä. Traileri on tripillä valinnainen.
+
+**`trips.truck_plate` on palvelimen täyttämä snapshot**, ei asiakkaan syöte. Peruste: dokumentit
+(Transport Order, CMR, lasku) on annettu sillä rekisterinumerolla, joka keikalla oli valintahetkellä —
+jos vetäjän rekisteri myöhemmin korjataan tai vetäjä siirtyy toiselle carrierille, valmiin keikan
+dokumenttitieto ei saa muuttua. Siksi: vetäjä valitaan → kopio rekisteristä; sama vetäjä → kopio säilyy;
+vetäjä vaihtuu → uusi kopio; vetäjä poistetaan keikalta → NULL. Nykyinen rekisteri tulee kyselyissä
+kentässä `tractor_registration`. Vanhat keikat, joita 0004 ei voinut linkittää (rekisteri/carrier ei
+täsmännyt), säilyttävät tekstinsä.
 
 ---
 
