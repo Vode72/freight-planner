@@ -15,3 +15,6 @@ backend/freight.db
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Migraatioiden varmuuskopiot (db_migrate.backup_if_pending)
+*.db.bak-*

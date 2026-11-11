@@ -26,21 +26,22 @@ export default function DriverPage() {
   const [busy, setBusy]     = useState(false);
   const [flash, setFlash]   = useState(null); // { text, ok }
 
-  const fetchData = async () => {
-    try {
-      const res = await fetch(`http://127.0.0.1:5000/api/driver/${trip_id}`);
-      if (!res.ok) { setError("Trippiä ei löydy: " + trip_id); return; }
-      const data = await res.json();
-      setTrip(data.trip);
-      setOrders(data.orders);
-    } catch {
-      setError("Yhteysvirhe — tarkista verkko");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchData(); }, [trip_id]);
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const res = await fetch(`http://127.0.0.1:5000/api/driver/${trip_id}`);
+        if (!res.ok) { setError("Trippiä ei löydy: " + trip_id); return; }
+        const data = await res.json();
+        setTrip(data.trip);
+        setOrders(data.orders);
+      } catch {
+        setError("Yhteysvirhe — tarkista verkko");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, [trip_id]);
 
   const checkin = async (action) => {
     setBusy(true);

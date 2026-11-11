@@ -115,7 +115,6 @@ function CustomerForm() {
     boxSizing: "border-box"
   };
 
-  const grid2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" };
   const grid3 = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" };
 
   const inputField = (field, label, type = "text") => (

@@ -9,12 +9,18 @@ Komentoriviltä (backend-hakemistossa):
     alembic upgrade head                      # FREIGHT_DB_PATH / backend/freight.db
     alembic -x db=polku.db upgrade head       # kohde annettuna
 
+Ennen upgradea olemassa olevasta kantatiedostosta otetaan varmuuskopio,
+jos siinä on ajamattomia revisioita (backup_if_pending): tiedosto
+``<kanta>.bak-<revisio>-<aikaleima>`` samaan hakemistoon. Kopio tehdään
+SQLiten backup-rajapinnalla, joten se on eheä myös WAL-tilassa.
+
 Koko upgrade ajetaan yhtenä transaktiona: pysqlite ei oletuksena aloita
 transaktiota DDL-lauseille, joten BEGIN annetaan itse (SQLAlchemyn
 dokumentoima resepti). Epäonnistunut migraatio ei jätä kantaa puolitiehen.
 """
 import os
 import sqlite3
+from datetime import datetime
 
 from alembic import command
 from alembic.config import Config
@@ -108,8 +114,53 @@ def downgrade_connection(conn, revision):
     _run(conn, command.downgrade, revision)
 
 
-def upgrade_db(db_path, revision="head"):
-    """Ajaa migraatiot kantatiedostoon. Luo tiedoston, jos sitä ei ole."""
+def head_revision():
+    from alembic.script import ScriptDirectory
+    return ScriptDirectory.from_config(alembic_config()).get_current_head()
+
+
+def backup_if_pending(db_path):
+    """Varmuuskopio kantatiedostosta ennen migraatiota.
+
+    Kopio tehdään vain, kun tiedosto on olemassa, siinä on tauluja ja sen
+    revisio ei ole head (eli upgrade muuttaisi sitä). Palauttaa kopion
+    polun tai None. Uutta tai tyhjää kantaa ei kopioida.
+    """
+    if not db_path or not os.path.exists(db_path) or os.path.getsize(db_path) == 0:
+        return None
+    src = sqlite3.connect(db_path)
+    try:
+        has_tables = src.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").fetchone()
+        current = current_revision(src)
+        if not has_tables or current == head_revision():
+            return None
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup_path = f"{db_path}.bak-{current or 'pre-alembic'}-{stamp}"
+        n = 1
+        while os.path.exists(backup_path):
+            n += 1
+            backup_path = f"{db_path}.bak-{current or 'pre-alembic'}-{stamp}-{n}"
+        dst = sqlite3.connect(backup_path)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+        return backup_path
+    finally:
+        src.close()
+
+
+def upgrade_db(db_path, revision="head", backup=True):
+    """Ajaa migraatiot kantatiedostoon. Luo tiedoston, jos sitä ei ole.
+
+    backup=True: olemassa olevasta, migroimattomasta kannasta otetaan ensin
+    varmuuskopio (backup_if_pending).
+    """
+    if backup:
+        backup_path = backup_if_pending(db_path)
+        if backup_path:
+            print(f"Varmuuskopio ennen migraatiota: {backup_path}")
     conn = sqlite3.connect(db_path)
     try:
         upgrade_connection(conn, revision)

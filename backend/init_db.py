@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import date, timedelta
 
+import equipment
 import money
 from db_migrate import upgrade_connection
 
@@ -86,8 +87,9 @@ def _seed_restrictions_demo(cursor):
 
 
 def _seed_hallinta_demo(cursor):
-    trailers = cursor.execute("SELECT plate_number, trailer_type FROM trailers").fetchall()
-    trailer_map = {t[0]: t[1] for t in trailers}
+    trailers = cursor.execute("SELECT id, plate_number, trailer_type FROM trailers").fetchall()
+    trailer_map = {t[1]: t[2] for t in trailers}
+    trailer_ids = {t[1]: t[0] for t in trailers}  # huoltohistoria viittaa id:hen (0005)
 
     cursor.execute("DELETE FROM trailer_maintenance")
 
@@ -103,7 +105,7 @@ def _seed_hallinta_demo(cursor):
     ]:
         if plate in trailer_map:
             maintenance_rows.append((
-                plate, "INSPECTION",
+                trailer_ids[plate], "INSPECTION",
                 (today - timedelta(days=days_ago)).isoformat(),
                 (today + timedelta(days=next_days - days_ago)).isoformat(),
                 "Katsastus OK",
@@ -117,7 +119,7 @@ def _seed_hallinta_demo(cursor):
         ttype = trailer_map.get(plate, "")
         if "Umpikaappi" in ttype:
             maintenance_rows.append((
-                plate, "REFRIGERATION",
+                trailer_ids[plate], "REFRIGERATION",
                 (today - timedelta(days=days_ago)).isoformat(),
                 (today + timedelta(days=next_days)).isoformat(),
                 "Kylmäkonehuolto suoritettu",
@@ -199,11 +201,13 @@ def seed_base_demo(conn):
         ("HRV-001", "CM-4101", "Megatrailer", 38, 59),
         ("HRV-002", "CM-4102", "Megatrailer", 38, 59),
     ]
-    # leasing_rate / rental_rate €/pv → sentteinä
+    # leasing_rate / rental_rate €/pv → sentteinä; lämpösäätö tyypin mukaan
     cursor.executemany(
         "INSERT INTO trailers (plate_number, identifier, trailer_type, "
-        "leasing_rate_cents, rental_rate_cents) VALUES (?, ?, ?, ?, ?)",
-        [(plate, ident, ttype, money.to_cents(leasing), money.to_cents(rental))
+        "leasing_rate_cents, rental_rate_cents, temperature_controlled) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        [(plate, ident, ttype, money.to_cents(leasing), money.to_cents(rental),
+          equipment.default_trailer_features(ttype)["temperature_controlled"])
          for plate, ident, ttype, leasing, rental in trailers],
     )
 
@@ -221,17 +225,31 @@ def seed_base_demo(conn):
         carriers,
     )
 
-    trucks = [
-        ("NRF-001", 1), ("NRF-002", 1),
-        ("BLR-001", 2), ("BLR-002", 2),
-        ("PHK-001", 3), ("PHK-002", 3),
-        ("ETR-001", 4), ("ETR-002", 4),
-        ("CTC-001", 5), ("CTC-002", 5),
-        ("SCL-001", 6), ("SCL-002", 6),
+    # Vetäjät (tractors): keksityt rekisterit ja Demo-mallinimet.
+    # (rekisteri, carrier, tyyppi, merkki/malli, päästöluokka, status,
+    #  max_weight kg, max_ldm, max_volume m³, adr, lämpö, takalaita, nosturi)
+    tractors = [
+        ("NRF-001", 1, "vetoauto", "Demo Hauler 500", "EURO VI", "aktiivinen", None, None, None, 0, 0, 0, 0),
+        ("NRF-002", 1, "vetoauto", "Demo Hauler 500", "EURO VI", "aktiivinen", None, None, None, 0, 0, 0, 0),
+        ("BLR-001", 2, "vetoauto", "Demo Hauler 460", "EURO VI", "aktiivinen", None, None, None, 0, 0, 0, 0),
+        ("BLR-002", 2, "vetoauto", "Demo Hauler 460", "EURO V", "aktiivinen", None, None, None, 0, 0, 0, 0),
+        ("PHK-001", 3, "vetoauto", "Demo Arctic 540", "EURO VI", "aktiivinen", None, None, None, 0, 0, 0, 0),
+        ("PHK-002", 3, "vetoauto", "Demo Arctic 540", "EURO VI", "huollossa", None, None, None, 0, 0, 0, 0),
+        ("ETR-001", 4, "vetoauto", "Demo Hauler 500", "EURO VI", "aktiivinen", None, None, None, 1, 0, 0, 0),
+        ("ETR-002", 4, "vetoauto", "Demo Hauler 460", "EURO VI", "aktiivinen", None, None, None, 1, 0, 0, 0),
+        ("CTC-001", 5, "vetoauto", "Demo Hauler 500", "EURO VI", "aktiivinen", None, None, None, 0, 0, 0, 0),
+        ("CTC-002", 5, "vetoauto", "Demo Hauler 460", "EURO VI", "aktiivinen", None, None, None, 0, 0, 0, 0),
+        ("SCL-001", 6, "vetoauto", "Demo Nordic 520", "EURO VI", "aktiivinen", None, None, None, 0, 0, 0, 0),
+        ("SCL-002", 6, "vetoauto", "Demo Nordic 520", "EURO V", "aktiivinen", None, None, None, 0, 0, 0, 0),
+        ("NRF-101", 1, "kuorma-auto", "Demo City 260", "EURO VI", "aktiivinen", 8000, 7.2, 45, 0, 1, 1, 0),
+        ("PHK-101", 3, "kuorma-auto", "Demo Crane 360", "EURO VI", "aktiivinen", 10000, 6.5, 40, 0, 0, 0, 1),
     ]
     cursor.executemany(
-        "INSERT INTO trucks (plate_number, carrier_id) VALUES (?, ?)",
-        trucks,
+        "INSERT INTO tractors (registration_number, carrier_id, vehicle_type, make_model, "
+        "emission_class, status, max_weight, max_ldm, max_volume, "
+        "adr, temperature_controlled, tail_lift, crane) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        tractors,
     )
 
     customers = [
@@ -319,9 +337,10 @@ def seed_base_demo(conn):
                 loading_date, loading_time_start, loading_time_end,
                 delivery_date, delivery_time_start, delivery_time_end,
                 ferry_route, ferry_departure, ferry_arrival,
-                adr, tail_lift, temperature_controlled, fixed_delivery_date)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, t)
+                adr, tail_lift, temperature_controlled, fixed_delivery_date, tractor_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+                    (SELECT id FROM tractors WHERE registration_number = ? AND carrier_id = ?))
+        """, (*t, t[12], t[9]))
         trip_db_ids.append(cursor.lastrowid)
 
     orders_demo = [
