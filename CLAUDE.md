@@ -1,7 +1,7 @@
 # Freight Planner — CLAUDE.md
 
 TMS-tyylinen kuljetustenhallintatyökalu portfolioprojektina.
-React 18 + Python Flask + SQLite. Kaikki data on keksittyä demodataa.
+React 19 (Create React App / react-scripts 5) + Python Flask + SQLite. Kaikki data on keksittyä demodataa.
 
 ---
 
@@ -293,6 +293,9 @@ täsmännyt), säilyttävät tekstinsä.
 
 ## Työskentelysäännöt
 
+- **Session alussa tarkista CI-tila** avoimen haaran/PR:n viimeisimmästä commitista (GitHub Actions).
+  Jos CI epäonnistuu: raportoi syy ja korjausehdotus — **älä pushaa korjausta ilman hyväksyntää**.
+  PR:iä ei seurata jatkuvasti.
 - Tee **aina ensin suunnitelma** ja odota hyväksyntää ennen koodausta
 - Työskentele **omassa haarassa** — yhdistä main-haaraan vasta kun testit menevät läpi
 - **Ei viittauksia oikeisiin työnantajiin tai yrityksiin** — käytä aina demodataa

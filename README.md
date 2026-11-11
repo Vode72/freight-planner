@@ -18,7 +18,7 @@ Designed to demonstrate how operational logistics expertise can be transformed i
 ## 🏗️ Architecture
 
 ```
-React 18 Frontend
+React 19 Frontend
        │
    REST API
        │
@@ -148,7 +148,7 @@ Python Flask
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 18, JavaScript, React Router v7 |
+| Frontend | React 19, JavaScript, React Router v7 |
 | Backend | Python 3, Flask, Flask-CORS |
 | Database | SQLite |
 | API | REST |

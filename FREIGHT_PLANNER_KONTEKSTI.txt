@@ -10,7 +10,7 @@ Freight Planner on TMS-tyylinen kuljetustenhallintatyökalu.
 Kaikki data on keksittyä demodataa — ei oikeita asiakasnimiä, rekkareita tai työdataa.
 
 TEKNINEN STACK:
-- Frontend: React 18, JavaScript, inline CSS
+- Frontend: React 19 (react-scripts 5), JavaScript, inline CSS
 - Teema: tumma #0f172a, oranssi aksentti #f97316
 - Backend: Python Flask, SQLite (freight.db, polku FREIGHT_DB_PATH tai backend/freight.db,
   ei versionhallinnassa — luodaan: python reset_demo.py)
@@ -931,6 +931,24 @@ VETÄJÄREKISTERI OSA 2 — SUUNNITELMALUONNOS (ODOTTAA HYVÄKSYNTÄÄ, ei kooda
   Haara ccr-008b37d6-i2aqgm, draft-PR auki; yhdistetään vasta kun osa 2 + testit + CI vihreinä.
   Nyt rikki ilman osaa 2: CarrierList, TripForm, HallintaKalusto/Vetäjät kutsuvat poistettua
   /api/trucks; TrailerForm vaatii rekisterin (vaihtokoria ei voi luoda UI:sta).
+  0. ENSIN (ennen komponentteja, CI vihreäksi): #26 + frontend-CI-job (npm ci, build, testit).
+     Selvitys 11.11.2026 (node 22.23 / npm 10.9, Linux, repon ulkopuolinen kopio):
+     - npm ci kaatuu: lock-tiedostosta puuttuu yksi rivi (tailwindcss/node_modules/yaml@2.9.1);
+       npm install korjaa, eikä muuta lockissa mitään muuta → lock uudelleen + commit.
+     - "jest/globals is unknown" EI toistu puhtaalla asennuksella (eslint-plugin-jest 25.7.0, myös
+       28/29 sisältävät environments-määrittelyn) → todennäköisesti paikallinen node_modules-tila;
+       varmistetaan CI:ssä (ubuntu) puhtaalla npm ci:llä.
+     - EI React 19 -yhteensopivuusongelma: ei peer-ristiriitoja (npm ls puhdas), npm test vihreä,
+       CI=false build kääntyy.
+     - UUSI ESTE CI:lle: CI=true tekee varoituksista virheitä → build kaatuu:
+       (a) ESLint-varoitukset: 3× react-hooks/exhaustive-deps (AddToTripModal, DriverPage,
+           FuelRateManager), 1× no-unused-vars (CustomerForm grid2);
+       (b) webpack "Critical dependency: the request of a dependency is an expression" lähteestä
+           node_modules/react-datepicker/dist/index.es.js (riippuvuus, ei omaa koodia).
+       Ratkaisuehdotus hyväksyttäväksi: (a) korjataan koodiin (exhaustive-deps useCallbackilla,
+       ei toiminnallista muutosta) ja (b) build CI:ssä CI=false + erillinen ESLint-ajo
+       --max-warnings=0, jotta omat varoitukset kaatavat CI:n mutta riippuvuuden webpack-varoitus ei.
+     - Testit: vain tyhjä App.test.js — osan 2 RTL-testit tuovat oikeat testit.
   1. useEquipmentMeta-hook (/api/equipment-meta): ominaisuudet, tyypit, statukset, päästöluokat.
   2. EquipmentFeatures.jsx: ominaisuuksien checkboxit + badget (vetäjät ja trailerit).
   3. TractorList.jsx (HallintaKalusto Vetäjät-välilehti, korvaa VetajatTab): haku, suodattimet
@@ -954,8 +972,8 @@ VETÄJÄREKISTERI OSA 2 — SUUNNITELMALUONNOS (ODOTTAA HYVÄKSYNTÄÄ, ei kooda
      traileri rekisteri || tunniste.
   9. Testit: RTL-testit ResourcePickerille (suodatus, pikaluonti, 409 → valitse olemassa oleva,
      huollossa-varoitus) ja TripFormille (carrier-suodatus, carrier vetäjältä), fetch mockattuna.
-  Avoimet: frontend-CI-job + build-korjaus #26 osaksi osaa 2?; FK-typeof-revisio (9 saraketta,
-  CLAUDE.md) erillisenä issuena?; CLAUDE.md sanoo React 18, package.json react ^19.2.5.
+  Päätetty: frontend-CI + #26 osan 2 ensimmäinen tehtävä; FK-typeof oma issue #37 (ei osaan 2);
+  React 19 kirjattu dokumentaatioon. Session alussa tarkistetaan CI-tila (CLAUDE.md).
 Issuet: #33 trips.trailer_plate-snapshot (rekisteri tai tunniste; ennen CMR/PDF:ää),
   #34 vaihtokori: tyyppi, kapasiteetti, hinnoittelu,
   #35 kuorma-auto tripillä (traileri piiloon, kapasiteetti kuorma-autosta).
