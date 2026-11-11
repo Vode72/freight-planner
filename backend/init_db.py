@@ -87,8 +87,9 @@ def _seed_restrictions_demo(cursor):
 
 
 def _seed_hallinta_demo(cursor):
-    trailers = cursor.execute("SELECT plate_number, trailer_type FROM trailers").fetchall()
-    trailer_map = {t[0]: t[1] for t in trailers}
+    trailers = cursor.execute("SELECT id, plate_number, trailer_type FROM trailers").fetchall()
+    trailer_map = {t[1]: t[2] for t in trailers}
+    trailer_ids = {t[1]: t[0] for t in trailers}  # huoltohistoria viittaa id:hen (0005)
 
     cursor.execute("DELETE FROM trailer_maintenance")
 
@@ -104,7 +105,7 @@ def _seed_hallinta_demo(cursor):
     ]:
         if plate in trailer_map:
             maintenance_rows.append((
-                plate, "INSPECTION",
+                trailer_ids[plate], "INSPECTION",
                 (today - timedelta(days=days_ago)).isoformat(),
                 (today + timedelta(days=next_days - days_ago)).isoformat(),
                 "Katsastus OK",
@@ -118,7 +119,7 @@ def _seed_hallinta_demo(cursor):
         ttype = trailer_map.get(plate, "")
         if "Umpikaappi" in ttype:
             maintenance_rows.append((
-                plate, "REFRIGERATION",
+                trailer_ids[plate], "REFRIGERATION",
                 (today - timedelta(days=days_ago)).isoformat(),
                 (today + timedelta(days=next_days)).isoformat(),
                 "Kylmäkonehuolto suoritettu",

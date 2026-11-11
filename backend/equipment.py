@@ -40,6 +40,16 @@ CAPACITY_FIELDS = {
 # Trailerityypit, joissa on lämpösäätö (oletus uudelle trailerille)
 TEMPERATURE_CONTROLLED_TRAILER_TYPES = {"Umpikaappi", "Sivuaukeava", "Umpikaappi 2-koneinen"}
 
+# Trailerin statukset (Alembic 0005 CHECK). Poistettu = käytöstä poistettu, historia säilyy.
+TRAILER_STATUSES = ["Vapaa", "Käytössä", "Huollossa", "Poistettu"]
+TRAILER_REMOVED_STATUS = "Poistettu"
+
+# Trailerin kentät, jotka trailers-endpointit tallentavat (järjestys = INSERT/UPDATE)
+TRAILER_FIELDS = [
+    "plate_number", "identifier", "trailer_type", "leasing_company",
+    "leasing_rate_cents", "rental_rate_cents", "status", *FEATURE_KEYS,
+]
+
 # Vetäjän muokattavat kentät (järjestys = INSERT/UPDATE)
 TRACTOR_FIELDS = [
     "registration_number", "carrier_id", "vehicle_type", "make_model",
@@ -54,6 +64,11 @@ def normalize_registration(value):
     if value is None:
         return ""
     return " ".join(str(value).split()).upper()
+
+
+def normalize_plate(value):
+    """Trailerin rekisteri: kuten normalize_registration, tyhjä → None (vaihtokori)."""
+    return normalize_registration(value) or None
 
 
 def _blank(value):
@@ -221,12 +236,42 @@ def validate_tractor(data, current=None):
     return values, errors
 
 
+# ── Traileri ──────────────────────────────────────────────────────────
+
+def validate_trailer_identity(data, errors, current=None):
+    """Rekisteri, tunniste ja status → (plate_number, identifier, status).
+
+    Rekisteri on valinnainen (vaihtokorit), tunniste pakollinen: tyhjä tunniste
+    = rekisterinumero. Puuttuva avain säilyttää currentin arvon (PUT).
+    Yksikäsitteisyys tarkistetaan kannasta (app._trailer_conflict).
+    """
+    def pick(field):
+        if field in data:
+            return data[field]
+        return current[field] if current is not None else None
+
+    plate = normalize_plate(pick("plate_number"))
+    identifier = pick("identifier")
+    identifier = None if _blank(identifier) else str(identifier).strip()
+    if identifier is None:
+        identifier = plate
+    if identifier is None:
+        errors.append("Rekisterinumero tai tunniste on pakollinen")
+    status = pick("status")
+    if _blank(status):
+        status = "Vapaa"
+    elif status not in TRAILER_STATUSES:
+        errors.append(f"status: sallitut arvot {', '.join(TRAILER_STATUSES)}")
+    return plate, identifier, status
+
+
 def meta():
     """Koodistot käyttöliittymälle (GET /api/equipment-meta)."""
     return {
         "features": [{"key": key, "label": label} for key, label in FEATURES],
         "vehicle_types": VEHICLE_TYPES,
         "tractor_statuses": TRACTOR_STATUSES,
+        "trailer_statuses": TRAILER_STATUSES,
         "emission_classes": EMISSION_CLASSES,
         "capacity_fields": [{"key": key, "label": label}
                             for key, (label, _) in CAPACITY_FIELDS.items()],

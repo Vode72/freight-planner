@@ -57,6 +57,7 @@ alembic revision -m "kuvaus"            # uusi skeemamuutos
 | `0002_reference_data` | Palvelukoodisto + 401→400, 831→830, oletusasetukset, fuel_rates → surcharge_rates (vanhat kannat) |
 | `0003_money_integer` | REAL-rahasarakkeet → INTEGER (`*_cents`, `*_e4`), muunnos Decimalina, downgrade mukana |
 | `0004_tractors` | Vetäjärekisteri `tractors` (trucks-rivit siirretään, taulu pudotetaan), ominaisuussarakkeet trailereille, `trips.tractor_id`, downgrade mukana |
+| `0005_trailer_identity` | Trailerin rekisteri valinnainen + uniikki kun ei NULL, tunniste pakollinen + uniikki, status-CHECK (+ Poistettu), `trailer_maintenance.trailer_id` → INTEGER FK `trailers.id`. Pysähtyy tuplista, orvoista huolloista (tulostaa siivous-SQL:n) ja tuntemattomasta statuksesta; downgrade pysähtyy rekisterittömiin trailereihin |
 
 - Koko upgrade on yksi transaktio: virhe ei jätä kantaa puolitiehen.
 - **Varmuuskopio ennen migraatiota:** `upgrade_db()` (myös `app.migrate_db()`) ja `alembic`-CLI
@@ -132,7 +133,7 @@ freight-planner/
 │   ├── db_config.py              # get_db_path(): FREIGHT_DB_PATH / backend/freight.db
 │   ├── db_migrate.py             # Alembic koodista: upgrade_db / upgrade_connection
 │   ├── alembic.ini
-│   ├── migrations/               # Alembic: env.py + versions/0001–0004
+│   ├── migrations/               # Alembic: env.py + versions/0001–0005
 │   ├── reset_demo.py             # Puhdas demokanta yhdellä komennolla
 │   ├── init_db.py                # create_schema() (= upgrade head) + seed_demo_data() + reset_db()
 │   ├── migrate_*.py              # Yhteensopivuuskääreet: alembic upgrade head
@@ -140,8 +141,9 @@ freight-planner/
 │   ├── pytest.ini
 │   └── tests/
 │       ├── conftest.py           # Testifixturet (tmp_path-kanta, Alembic + demodata)
-│       ├── test_alembic.py       # Migraatiot: tyhjä/vanha kanta, rahamuunnos, trucks→tractors, downgrade, rollback, CLI, varmuuskopio
+│       ├── test_alembic.py       # Migraatiot: tyhjä/vanha kanta, rahamuunnos, trucks→tractors, trailerien yksikäsitteisyys, downgrade, rollback, CLI, varmuuskopio
 │       ├── test_tractors.py      # Vetäjät: CRUD, carrier-validointi, pikaluonti, ominaisuudet (myös trailerit)
+│       ├── test_trailers.py      # Trailerit: rekisteri/tunniste 409, vaihtokori, Poistettu, DELETE 409, huoltohistoria id:llä
 │       ├── test_money.py         # Rahapyöristys (0,1 + 0,2), Decimal ↔ sentit, API-muoto
 │       ├── test_id_gen.py        # ID-generoinnin testit
 │       ├── test_services.py      # Palvelukoodiston ja migraation testit
@@ -241,8 +243,18 @@ Koodistot ja validointi ovat `backend/equipment.py`:ssä (`GET /api/equipment-me
 **Ominaisuudet** (`adr`, `temperature_controlled`, `tail_lift`, `crane`) ovat samannimisiä 0/1-sarakkeita
 sekä `tractors`- että `trailers`-taulussa (samat nimet kuin trips/orders-lipuilla). API:ssa molemmilla
 `features: {"adr": false, …}`. Uusi ominaisuus = uusi Alembic-revisio + `equipment.FEATURES`.
-Trailerin pikaluonti: `plate_number` + `trailer_type` (identifier = rekisteri, lämpösäätö tyypin mukaan);
-trailereilla ei ole carrieria (leasing-pooli).
+Trailereilla ei ole carrieria (leasing-pooli).
+
+**Trailerit** (`/api/trailers`, Alembic 0005):
+- `plate_number` valinnainen (vaihtokoreilla ei rekisteriä), normalisoitu kuten vetäjillä, uniikki kun ei NULL;
+  `identifier` pakollinen ja uniikki (kirjainkoosta riippumatta), tyhjä tunniste = rekisterinumero.
+- Pikaluonti: `trailer_type` + `plate_number` tai `identifier` (lämpösäätö tyypin mukaan). Varattu rekisteri
+  tai tunniste → 409 + `field` + `existing` (POST ja PUT). PUT on osittainen.
+- `status` Vapaa / Käytössä / Huollossa / Poistettu. Poistetut piilossa (`?include_removed=1` näyttää);
+  Poistettua traileria ei voi valita uudelle keikalle (jo valittu saa jäädä).
+- DELETE → 409, jos trailerilla on keikkoja (myös laskutettuja) tai huoltohistoriaa: aseta status Poistettu.
+- Huoltohistoria (`trailer_maintenance.trailer_id`) viittaa trailerin id:hen: rekisterin muutos ei irrota sitä,
+  eikä samalla rekisterillä luotu uusi traileri peri vanhaa historiaa.
 
 **Tripin vetäjä** (`trips.tractor_id`, nullable): `tractor.carrier_id = trip.carrier_id`, muuten 400.
 Tripillä ei carrieria → carrier asetetaan vetäjältä. Poistettua vetäjää ei voi valita (jo valittu saa jäädä).

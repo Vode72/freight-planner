@@ -467,3 +467,147 @@ def test_alembic_cli_backs_up_pending_database(tmp_path):
         cwd=BACKEND_DIR, env=env, check=True, capture_output=True, text=True)
     assert "Varmuuskopio ennen migraatiota" in result.stdout
     assert [b for b in _backups(tmp_path) if b.startswith("cli-old.db.bak-0003-")]
+
+
+# ── 0005: trailerien yksikäsitteisyys, huoltohistoria id:hen ──────────
+
+def _db_at_0004(path, trailers, maintenance=()):
+    """Kanta revisiossa 0004. trailers: (id, plate, identifier, status);
+    maintenance: (id, rekisteriteksti)."""
+    conn = sqlite3.connect(path)
+    upgrade_connection(conn, "0004")
+    conn.executemany(
+        "INSERT INTO trailers (id, plate_number, identifier, trailer_type, status) "
+        "VALUES (?, ?, ?, 'Pressutrailer', ?)", trailers)
+    conn.executemany(
+        "INSERT INTO trailer_maintenance (id, trailer_id, maintenance_type, date, notes) "
+        "VALUES (?, ?, 'INSPECTION', '2026-01-15', 'Demo')", maintenance)
+    conn.commit()
+    return conn
+
+
+def _snapshot(conn):
+    return _schema(conn), _data(conn), current_revision(conn)
+
+
+def test_trailer_migration_links_maintenance_to_ids(tmp_path):
+    conn = _db_at_0004(str(tmp_path / "t5.db"),
+                       [(1, "abc-1 ", "T-1", "Vapaa"), (2, "DEF-2", "T-2", "Käytössä"),
+                        (5, "GHI-3", "T-3", None)],
+                       [(10, "ABC-1"), (11, "abc-1"), (12, " def-2"), (13, "DEF-2")])
+    upgrade_connection(conn)
+    assert current_revision(conn) == HEAD
+    assert conn.execute("SELECT id, plate_number, identifier, status FROM trailers ORDER BY id"
+                        ).fetchall() == [(1, "ABC-1", "T-1", "Vapaa"), (2, "DEF-2", "T-2", "Käytössä"),
+                                         (5, "GHI-3", "T-3", "Vapaa")]
+    assert conn.execute("SELECT id, trailer_id, typeof(trailer_id) FROM trailer_maintenance "
+                        "ORDER BY id").fetchall() == [
+        (10, 1, "integer"), (11, 1, "integer"), (12, 2, "integer"), (13, 2, "integer")]
+    trailer_cols = {r[1]: r for r in conn.execute("PRAGMA table_info(trailers)")}
+    assert trailer_cols["plate_number"][3] == 0       # rekisteri valinnainen
+    assert trailer_cols["identifier"][3] == 1         # tunniste pakollinen
+    # AUTOINCREMENT jatkuu, rekisteritön vaihtokori sallittu, tuplat estetty
+    swap_id = conn.execute("INSERT INTO trailers (identifier, trailer_type) "
+                           "VALUES ('VK-1', 'Pressutrailer')").lastrowid
+    assert swap_id == 6
+    conn.execute("INSERT INTO trailers (identifier, trailer_type) VALUES ('VK-2', 'Pressutrailer')")
+    for sql in ("INSERT INTO trailers (plate_number, identifier, trailer_type) VALUES ('Abc-1', 'X', 'Megatrailer')",
+                "INSERT INTO trailers (identifier, trailer_type) VALUES ('t-1', 'Megatrailer')",
+                "INSERT INTO trailers (identifier, trailer_type, status) VALUES ('Y', 'Megatrailer', 'Romu')",
+                "INSERT INTO trailer_maintenance (trailer_id, maintenance_type, date) VALUES ('ABC-1', 'OTHER', '2026-01-01')"):
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(sql)
+    conn.close()
+
+
+def test_trailer_migration_fills_identifier_from_plate(tmp_path, capsys):
+    conn = _db_at_0004(str(tmp_path / "fill.db"),
+                       [(1, "AAA-1", "", "Vapaa"), (2, "BBB-2", "  ", "Vapaa"), (3, "CCC-3", "C-3", "Vapaa")])
+    upgrade_connection(conn)
+    assert conn.execute("SELECT id, identifier FROM trailers ORDER BY id").fetchall() == [
+        (1, "AAA-1"), (2, "BBB-2"), (3, "C-3")]
+    out = capsys.readouterr().out
+    assert "id=1 tyhjä tunniste täytetty rekisterillä AAA-1" in out
+    assert "id=2 tyhjä tunniste täytetty rekisterillä BBB-2" in out
+    assert "id=3" not in out
+    conn.close()
+
+
+@pytest.mark.parametrize("trailers,expected", [
+    # rekisterituplat (kirjainkoosta ja välilyönneistä riippumatta)
+    ([(1, "DUP-1", "A", "Vapaa"), (2, " dup-1", "B", "Vapaa")], "Rekisterinumero DUP-1 on usealla trailerilla: id=1, id=2"),
+    # tunnistetuplat
+    ([(1, "P-1", "Sama", "Vapaa"), (2, "P-2", "SAMA", "Vapaa")], "Tunniste Sama on usealla trailerilla: id=1, id=2"),
+    # täyttö törmää olemassa olevaan tunnisteeseen → todellinen tupla
+    ([(1, "X-1", "", "Vapaa"), (2, "X-2", "X-1", "Vapaa")],
+     "Tunniste X-1 on usealla trailerilla: id=1 (tunniste täytetty rekisteristä), id=2"),
+    # tuntematon status
+    ([(1, "S-1", "S-1", "Romutettu")], "tuntematon status 'Romutettu'"),
+])
+def test_trailer_migration_stops_on_conflicts(tmp_path, trailers, expected):
+    conn = _db_at_0004(str(tmp_path / "dup.db"), trailers)
+    before = _snapshot(conn)
+    with pytest.raises(ValueError, match="Migraatio 0005 pysähtyi") as err:
+        upgrade_connection(conn)
+    assert expected in str(err.value)
+    assert _snapshot(conn) == before  # kanta ennallaan (revisio 0004)
+    conn.close()
+
+
+def test_trailer_migration_stops_on_orphan_maintenance(tmp_path):
+    conn = _db_at_0004(str(tmp_path / "orphan.db"),
+                       [(1, "OK-1", "OK-1", "Vapaa")],
+                       [(20, "OK-1"), (21, "POISTETTU-9"), (22, "EI-OLE")])
+    before = _snapshot(conn)
+    with pytest.raises(ValueError) as err:
+        upgrade_connection(conn)
+    message = str(err.value)
+    assert "Orpoja huoltorivejä" in message
+    assert "trailer_maintenance id=21" in message and "'POISTETTU-9'" in message
+    assert "trailer_maintenance id=22" in message
+    assert "id=20" not in message
+    assert "DELETE FROM trailer_maintenance WHERE id IN (21, 22);" in message
+    assert _snapshot(conn) == before
+
+    # Virheilmoituksen siivous-SQL kelpaa sellaisenaan
+    cleanup = next(line.strip() for line in message.splitlines() if line.strip().startswith("DELETE"))
+    conn.execute(cleanup)
+    conn.commit()
+    upgrade_connection(conn)
+    assert current_revision(conn) == HEAD
+    assert conn.execute("SELECT id, trailer_id FROM trailer_maintenance").fetchall() == [(20, 1)]
+    conn.close()
+
+
+def test_trailer_migration_downgrade_and_upgrade_again(tmp_path):
+    from db_migrate import downgrade_connection
+    conn = _db_at_0004(str(tmp_path / "down.db"),
+                       [(1, "ABC-1", "T-1", "Vapaa"), (2, "DEF-2", "T-2", "Huollossa")],
+                       [(10, "ABC-1"), (11, "DEF-2")])
+    upgrade_connection(conn)
+    conn.execute("UPDATE trailers SET status = 'Poistettu' WHERE id = 2")
+    conn.commit()
+    after_upgrade = _snapshot(conn)
+    downgrade_connection(conn, "0004")
+    assert current_revision(conn) == "0004"
+    assert conn.execute("SELECT id, trailer_id FROM trailer_maintenance ORDER BY id").fetchall() == [
+        (10, "ABC-1"), (11, "DEF-2")]
+    assert conn.execute("SELECT status FROM trailers WHERE id = 2").fetchone() == ("Poistettu",)
+    upgrade_connection(conn)
+    assert _snapshot(conn) == after_upgrade
+    conn.close()
+
+
+def test_trailer_downgrade_stops_on_trailers_without_plate(tmp_path):
+    from db_migrate import downgrade_connection
+    conn = _db_at_0004(str(tmp_path / "swap.db"), [(1, "ABC-1", "T-1", "Vapaa")], [(10, "ABC-1")])
+    upgrade_connection(conn)
+    conn.execute("INSERT INTO trailers (id, identifier, trailer_type) VALUES (7, 'VK-7', 'Pressutrailer')")
+    conn.commit()
+    before = _snapshot(conn)
+    with pytest.raises(ValueError, match=r"Downgrade 0005 → 0004 pysähtyi.*1 traileria ilman "
+                                         r"rekisterinumeroa \(id=7 \(VK-7\)\)"):
+        downgrade_connection(conn, "0004")
+    assert _snapshot(conn) == before
+    assert current_revision(conn) == "0005"
+    conn.close()

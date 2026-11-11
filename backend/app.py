@@ -303,13 +303,22 @@ def get_next_order_reference():
 
 
 # ===== TRAILERS =====
+# Alembic 0005: plate_number valinnainen (vaihtokorit) ja uniikki kun ei NULL,
+# identifier pakollinen ja uniikki, status Vapaa/Käytössä/Huollossa/Poistettu.
+
+TRAILER_ORDER = "ORDER BY trailer_type, COALESCE(plate_number, identifier)"
+
 
 @app.route("/api/trailers", methods=["GET"])
 def get_trailers():
+    """Poistetut (status Poistettu) piilotetaan oletuksena; include_removed=1 näyttää ne."""
     conn = get_db_connection()
-    trailers = conn.execute(
-        "SELECT * FROM trailers ORDER BY trailer_type, plate_number"
-    ).fetchall()
+    if request.args.get("include_removed", "").lower() in ("1", "true"):
+        trailers = conn.execute(f"SELECT * FROM trailers {TRAILER_ORDER}").fetchall()
+    else:
+        trailers = conn.execute(
+            f"SELECT * FROM trailers WHERE status <> ? {TRAILER_ORDER}",
+            (equipment.TRAILER_REMOVED_STATUS,)).fetchall()
     conn.close()
     return jsonify([_trailer_to_api(t) for t in trailers])
 
@@ -324,110 +333,179 @@ def _trailer_to_api(row):
 
 
 def _get_trailer(conn, trailer_id):
-    return _trailer_to_api(conn.execute(
-        "SELECT * FROM trailers WHERE id = ?", (trailer_id,)).fetchone())
+    row = conn.execute("SELECT * FROM trailers WHERE id = ?", (trailer_id,)).fetchone()
+    return _trailer_to_api(row) if row else None
 
 
-def _trailer_rates(data):
-    """leasing_rate / rental_rate (€/pv) → (sentit, sentit, virheet)."""
+def _trailer_rates(data, current=None):
+    """leasing_rate / rental_rate (€/pv) → (sentit, sentit, virheet).
+    current: puuttuva kenttä säilyttää nykyisen arvon (PUT)."""
     errors = []
-    leasing = money.parse_field(data, "leasing_rate", errors) or Decimal(0)
-    rental = money.parse_field(data, "rental_rate", errors) or Decimal(0)
-    return money.to_cents(leasing), money.to_cents(rental), errors
+    result = []
+    for field in ("leasing_rate", "rental_rate"):
+        if current is not None and field not in data:
+            result.append(current[f"{field}_cents"])
+        else:
+            value = money.parse_field(data, field, errors) or Decimal(0)
+            result.append(money.to_cents(value))
+    return result[0], result[1], errors
+
+
+def _trailer_conflict(conn, plate, identifier, exclude_id=None):
+    """Varattu rekisteri tai tunniste (kirjainkoosta riippumatta) → 409-vastaus tai None."""
+    for field, value, label in (("plate_number", plate, "Rekisterinumero"),
+                                ("identifier", identifier, "Tunniste")):
+        if value is None:
+            continue
+        row = conn.execute(
+            f"SELECT id FROM trailers WHERE {field} = ? COLLATE NOCASE AND id IS NOT ?",
+            (value, exclude_id)).fetchone()
+        if row:
+            return jsonify({
+                "error": f"{label} {value} on jo käytössä",
+                "field": field,
+                "existing": _get_trailer(conn, row["id"]),
+            }), 409
+    return None
+
+
+def _save_trailer(conn, values, trailer_id=None):
+    """INSERT tai UPDATE; UNIQUE-kilpatilanne → 409 kuten tarkistuksessa."""
+    columns = equipment.TRAILER_FIELDS
+    try:
+        if trailer_id is None:
+            cursor = conn.execute(
+                f"INSERT INTO trailers ({', '.join(columns)}) "
+                f"VALUES ({', '.join('?' * len(columns))})",
+                [values[c] for c in columns])
+            trailer_id = cursor.lastrowid
+        else:
+            conn.execute(
+                f"UPDATE trailers SET {', '.join(f'{c} = ?' for c in columns)} WHERE id = ?",
+                [values[c] for c in columns] + [trailer_id])
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        conflict = _trailer_conflict(conn, values["plate_number"], values["identifier"],
+                                     trailer_id)
+        if conflict:
+            return None, conflict
+        raise
+    conn.commit()
+    return trailer_id, None
+
+
+def _trailer_values(data, current=None):
+    """Syöte (+ nykyinen rivi PUTissa) → (kannan arvot, virheet)."""
+    leasing_cents, rental_cents, errors = _trailer_rates(data, current)
+    plate, identifier, status = equipment.validate_trailer_identity(data, errors, current)
+    if "trailer_type" in data or current is None:
+        trailer_type = data.get("trailer_type")
+    else:
+        trailer_type = current["trailer_type"]
+    if not trailer_type:
+        errors.append("Trailerityyppi on pakollinen")
+    base = ({k: current[k] for k in equipment.FEATURE_KEYS} if current is not None
+            else equipment.default_trailer_features(trailer_type))
+    features = equipment.parse_features(data, errors, base=base)
+
+    def pick(field, default):
+        if field in data:
+            return data[field]
+        return current[field] if current is not None else default
+
+    values = {
+        "plate_number": plate, "identifier": identifier, "trailer_type": trailer_type,
+        "leasing_company": pick("leasing_company", DEFAULT_LEASING_COMPANY),
+        "leasing_rate_cents": leasing_cents, "rental_rate_cents": rental_cents,
+        "status": status, **features,
+    }
+    return values, errors
 
 
 @app.route("/api/trailers", methods=["POST"])
 def create_trailer():
-    """Trailerin luonti. Pikaluonti: pelkkä plate_number + trailer_type —
-    identifier on silloin rekisterinumero ja ominaisuudet tyypin oletus
-    (lämpösäätö thermo-tyypeille). Vastaus sisältää koko rivin (trailer)."""
-    data = request.get_json()
-    if not data or not str(data.get("plate_number") or "").strip() or not data.get("trailer_type"):
-        return jsonify({"error": "Rekisterinumero ja tyyppi ovat pakollisia"}), 400
-    leasing_cents, rental_cents, errors = _trailer_rates(data)
-    features = equipment.parse_features(
-        data, errors, base=equipment.default_trailer_features(data.get("trailer_type")))
+    """Trailerin luonti. Pikaluonti: trailer_type + plate_number tai identifier
+    (vaihtokori: pelkkä tunniste). Tunniste on oletuksena rekisterinumero ja
+    ominaisuudet tyypin oletus. Vastaus sisältää koko rivin (trailer).
+    Varattu rekisteri tai tunniste → 409 + existing."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _money_error(["Puuttuva data"])
+    values, errors = _trailer_values(data)
     if errors:
         return _money_error(errors)
-    plate = str(data["plate_number"]).strip()
-    identifier = str(data.get("identifier") or "").strip() or plate
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(f"""
-        INSERT INTO trailers (plate_number, identifier, trailer_type, leasing_company,
-                              leasing_rate_cents, rental_rate_cents, status,
-                              {", ".join(equipment.FEATURE_KEYS)})
-        VALUES (?, ?, ?, ?, ?, ?, ?, {", ".join("?" * len(equipment.FEATURE_KEYS))})
-    """, (
-        plate,
-        identifier,
-        data.get("trailer_type"),
-        data.get("leasing_company", DEFAULT_LEASING_COMPANY),
-        leasing_cents,
-        rental_cents,
-        data.get("status", "Vapaa"),
-        *(features[k] for k in equipment.FEATURE_KEYS),
-    ))
-    conn.commit()
-    new_id = cursor.lastrowid
-    trailer = _get_trailer(conn, new_id)
-    conn.close()
-    return jsonify({"message": "Traileri luotu", "id": new_id, "trailer": trailer}), 201
+    try:
+        conflict = _trailer_conflict(conn, values["plate_number"], values["identifier"])
+        if conflict:
+            return conflict
+        new_id, conflict = _save_trailer(conn, values)
+        if conflict:
+            return conflict
+        return jsonify({"message": "Traileri luotu", "id": new_id,
+                        "trailer": _get_trailer(conn, new_id)}), 201
+    finally:
+        conn.close()
 
 
 @app.route("/api/trailers/<int:trailer_id>", methods=["PUT"])
 def update_trailer(trailer_id):
+    """Osittainen päivitys: puuttuvat kentät säilyvät. Huoltohistoria viittaa
+    trailerin id:hen, joten rekisterin muutos ei irrota sitä."""
     conn = get_db_connection()
-    current = conn.execute("SELECT * FROM trailers WHERE id=?", (trailer_id,)).fetchone()
-    if not current:
+    try:
+        current = conn.execute("SELECT * FROM trailers WHERE id=?", (trailer_id,)).fetchone()
+        if not current:
+            return jsonify({"error": "Traileria ei löydy"}), 404
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return _money_error(["Puuttuva data"])
+        values, errors = _trailer_values(data, current)
+        if errors:
+            return _money_error(errors)
+        conflict = _trailer_conflict(conn, values["plate_number"], values["identifier"],
+                                     trailer_id)
+        if conflict:
+            return conflict
+        _, conflict = _save_trailer(conn, values, trailer_id)
+        if conflict:
+            return conflict
+        return jsonify({"message": "Traileri päivitetty",
+                        "trailer": _get_trailer(conn, trailer_id)})
+    finally:
         conn.close()
-        return jsonify({"error": "Traileria ei löydy"}), 404
-    data = request.get_json() or {}
-    leasing_cents, rental_cents, errors = _trailer_rates(data)
-    # Puuttuva features-avain säilyttää nykyiset ominaisuudet
-    features = equipment.parse_features(
-        data, errors, base={k: current[k] for k in equipment.FEATURE_KEYS})
-    if errors:
-        conn.close()
-        return _money_error(errors)
-    conn.execute(f"""
-        UPDATE trailers SET plate_number=?, identifier=?, trailer_type=?,
-            leasing_company=?, leasing_rate_cents=?, rental_rate_cents=?, status=?,
-            {", ".join(f"{k}=?" for k in equipment.FEATURE_KEYS)}
-        WHERE id=?
-    """, (
-        data.get("plate_number"),
-        data.get("identifier", ""),
-        data.get("trailer_type"),
-        data.get("leasing_company", DEFAULT_LEASING_COMPANY),
-        leasing_cents,
-        rental_cents,
-        data.get("status", "Vapaa"),
-        *(features[k] for k in equipment.FEATURE_KEYS),
-        trailer_id
-    ))
-    conn.commit()
-    conn.close()
-    return jsonify({"message": "Traileri päivitetty"})
 
 
 @app.route("/api/trailers/<int:trailer_id>", methods=["DELETE"])
 def delete_trailer(trailer_id):
+    """Vain traileri, jolla ei ole keikkoja eikä huoltohistoriaa, poistetaan.
+    Muuten 409: historia säilyy, traileri poistetaan käytöstä statuksella Poistettu."""
     conn = get_db_connection()
-    if not conn.execute("SELECT id FROM trailers WHERE id=?", (trailer_id,)).fetchone():
+    try:
+        if not conn.execute("SELECT id FROM trailers WHERE id=?", (trailer_id,)).fetchone():
+            return jsonify({"error": "Traileria ei löydy"}), 404
+        trips = conn.execute(
+            "SELECT COUNT(*) FROM trips WHERE trailer_id = ?", (trailer_id,)).fetchone()[0]
+        maintenance = conn.execute(
+            "SELECT COUNT(*) FROM trailer_maintenance WHERE trailer_id = ?",
+            (trailer_id,)).fetchone()[0]
+        if trips or maintenance:
+            reasons = []
+            if trips:
+                reasons.append(f"{trips} keikalla")
+            if maintenance:
+                reasons.append(f"{maintenance} huoltomerkintää")
+            return jsonify({
+                "error": f"Traileria ei voi poistaa ({' ja '.join(reasons)}) — aseta status "
+                         f"'{equipment.TRAILER_REMOVED_STATUS}' poistamisen sijaan",
+                "trip_count": trips,
+                "maintenance_count": maintenance,
+            }), 409
+        conn.execute("DELETE FROM trailers WHERE id=?", (trailer_id,))
+        conn.commit()
+        return jsonify({"message": "Traileri poistettu"})
+    finally:
         conn.close()
-        return jsonify({"error": "Traileria ei löydy"}), 404
-    active = conn.execute("""
-        SELECT COUNT(*) as c FROM trips
-        WHERE trailer_id=? AND status NOT IN ('Laskutettu')
-    """, (trailer_id,)).fetchone()["c"]
-    if active > 0:
-        conn.close()
-        return jsonify({"error": f"Trailerilla on {active} aktiivista keikkaa — poista ensin keikkalinkitykset"}), 400
-    conn.execute("DELETE FROM trailers WHERE id=?", (trailer_id,))
-    conn.commit()
-    conn.close()
-    return jsonify({"message": "Traileri poistettu"})
 
 
 # ===== CARRIERS =====
@@ -723,6 +801,26 @@ def _blank(value):
     return value is None or (isinstance(value, str) and not value.strip())
 
 
+def _trip_trailer_error(conn, data, current=None):
+    """Keikan traileri (valinnainen): olemassa, eikä Poistettu-statuksella
+    uutena valintana (jo valittu saa jäädä). Virhe tai None."""
+    raw = data.get("trailer_id")
+    if _blank(raw):
+        return None
+    try:
+        trailer_id = int(raw)
+    except (TypeError, ValueError):
+        return "trailer_id: odotettiin kokonaisluku"
+    trailer = conn.execute(
+        "SELECT identifier, status FROM trailers WHERE id = ?", (trailer_id,)).fetchone()
+    if not trailer:
+        return "Traileria ei löydy"
+    same = current is not None and current["trailer_id"] == trailer_id
+    if trailer["status"] == equipment.TRAILER_REMOVED_STATUS and not same:
+        return f"Traileri {trailer['identifier']} on poistettu käytöstä"
+    return None
+
+
 def _resolve_trip_tractor(conn, data, current=None):
     """Keikan carrier, vetäjä ja truck_plate-kopio → (carrier_id, tractor_id, truck_plate, virhe).
 
@@ -872,6 +970,7 @@ def create_trip():
 
     conn = get_db_connection()
     carrier_id, tractor_id, truck_plate, error = _resolve_trip_tractor(conn, data)
+    error = error or _trip_trailer_error(conn, data)
     if error:
         conn.close()
         return jsonify({"error": error}), 400
@@ -933,7 +1032,8 @@ def create_trip():
 def update_trip(trip_id):
     conn = get_db_connection()
     trip = conn.execute(
-        "SELECT status, tractor_id, truck_plate FROM trips WHERE id = ?", (trip_id,)).fetchone()
+        "SELECT status, tractor_id, truck_plate, trailer_id FROM trips WHERE id = ?",
+        (trip_id,)).fetchone()
 
     if not trip:
         conn.close()
@@ -945,6 +1045,7 @@ def update_trip(trip_id):
 
     data = request.get_json() or {}
     carrier_id, tractor_id, truck_plate, error = _resolve_trip_tractor(conn, data, trip)
+    error = error or _trip_trailer_error(conn, data, trip)
     if error:
         conn.close()
         return jsonify({"error": error}), 400
@@ -2284,13 +2385,12 @@ def check_restrictions_api():
 @app.route("/api/trailers/<int:tid>/maintenance", methods=["GET"])
 def get_trailer_maintenance(tid):
     conn = get_db_connection()
-    trailer = conn.execute("SELECT plate_number FROM trailers WHERE id=?", (tid,)).fetchone()
-    if not trailer:
+    if not conn.execute("SELECT 1 FROM trailers WHERE id=?", (tid,)).fetchone():
         conn.close()
         return jsonify({"error": "Traileria ei löydy"}), 404
     rows = conn.execute(
         "SELECT * FROM trailer_maintenance WHERE trailer_id=? ORDER BY date DESC",
-        (trailer["plate_number"],)
+        (tid,)
     ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
@@ -2299,8 +2399,7 @@ def get_trailer_maintenance(tid):
 @app.route("/api/trailers/<int:tid>/maintenance", methods=["POST"])
 def add_trailer_maintenance(tid):
     conn = get_db_connection()
-    trailer = conn.execute("SELECT plate_number FROM trailers WHERE id=?", (tid,)).fetchone()
-    if not trailer:
+    if not conn.execute("SELECT 1 FROM trailers WHERE id=?", (tid,)).fetchone():
         conn.close()
         return jsonify({"error": "Traileria ei löydy"}), 404
     data = request.get_json()
@@ -2309,7 +2408,7 @@ def add_trailer_maintenance(tid):
         INSERT INTO trailer_maintenance (trailer_id, maintenance_type, date, next_due, notes)
         VALUES (?,?,?,?,?)
     """, (
-        trailer["plate_number"],
+        tid,
         data.get("maintenance_type", "OTHER"),
         data.get("date"),
         data.get("next_due"),

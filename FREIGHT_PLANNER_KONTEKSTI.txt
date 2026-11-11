@@ -30,6 +30,8 @@ Alembic: backend/alembic.ini + backend/migrations/ (render_as_batch=True)
   0003_money_integer  REAL-rahasarakkeet → INTEGER (*_cents / *_e4)
   0004_tractors       vetäjärekisteri: tractors-taulu (trucks siirretty + pudotettu),
                       ominaisuussarakkeet trailereille, trips.tractor_id
+  0005_trailer_identity trailers: rekisteri valinnainen + uniikki, tunniste pakollinen + uniikki,
+                      status-CHECK (+ Poistettu), huoltohistoria trailers.id-viitteeksi
   Varmuuskopio: upgrade_db() ja alembic-CLI kopioivat olemassa olevan, migroimattoman
   kannan ensin tiedostoon <kanta>.bak-<revisio>-<aikaleima> (db_migrate.backup_if_pending).
   Ajo: cd backend && alembic upgrade head  (tai -x db=polku)
@@ -172,7 +174,10 @@ trailers: (12 kpl Demo Trailer Leasing Oy)
   plate_number, identifier, trailer_type, leasing_rate_cents, rental_rate_cents, status
   ominaisuudet ✅ (0004): adr, temperature_controlled, tail_lift, crane (0/1, sama rakenne
     kuin tractors; API: features-objekti). Lämpösäätö oletuksena thermo-tyypeille.
-  Pikaluonti: POST /api/trailers {plate_number, trailer_type} → identifier = rekisteri.
+  ✅ 0005: plate_number valinnainen (vaihtokori), uniikki kun ei NULL; identifier pakollinen,
+    uniikki (tyhjä → rekisteri); status Vapaa/Käytössä/Huollossa/Poistettu (Poistettu piilossa,
+    ?include_removed=1). DELETE 409 jos keikkoja tai huoltohistoriaa → status Poistettu.
+  Pikaluonti: POST /api/trailers {trailer_type, plate_number tai identifier}; varattu → 409 + existing.
   Tyypit: Umpikaappi (42/65€), Sivuaukeava (45/70€),
           Umpikaappi 2-koneinen (43/67€), Pressutrailer (35/54€), Megatrailer (38/59€)
   ✅ VALMIS (Feature 7A):
@@ -184,7 +189,7 @@ trailers: (12 kpl Demo Trailer Leasing Oy)
   maintenance_notes     (vapaa teksti, huoltofirma jne.)
 
 trailer_maintenance: ✅ VALMIS
-  id, trailer_id, maintenance_type (INSPECTION/REFRIGERATION/OTHER),
+  id, trailer_id (INTEGER → trailers.id, 0005; ennen rekisteriteksti), maintenance_type (INSPECTION/REFRIGERATION/OTHER),
   date, next_due, notes, created_at
   (historia kaikista huolloista ja katsastuksista)
 
@@ -921,12 +926,14 @@ GIT-Tilanne
 GitHub: github.com/Vode72/freight-planner
 .gitignore: node_modules/, frontend/build/, __pycache__/ ja backend/freight.db jätetään pois
 (freight.db, build ja .pyc poistettu versionhallinnasta issuessa #14; historiaa ei siivottu)
-Viimeisin commit: Vetäjärekisteri osa 1 — Alembic 0004, equipment.py, /api/tractors, testit
+Viimeisin commit: Trailerien yksikäsitteisyys — Alembic 0005, huoltohistoria id:hen, Poistettu-status
 Vetäjärekisteri osa 2 (TULOSSA, frontend): HallintaKalusto Vetäjät-välilehti (TractorList/Form),
   EquipmentFeatures, ResourcePicker ("hae tai luo" + pikalomake) TripFormiin,
   CarrierList ja TripForm /api/trucks → /api/tractors (nyt rikki ilman osaa 2!),
   TripDetail näyttää tractor_registration.
-Erillinen issue: kuorma-auto tripillä (traileri piiloon, kapasiteetti kuorma-autosta).
+Issuet: #33 trips.trailer_plate-snapshot (rekisteri tai tunniste; ennen CMR/PDF:ää),
+  #34 vaihtokori: tyyppi, kapasiteetti, hinnoittelu,
+  #35 kuorma-auto tripillä (traileri piiloon, kapasiteetti kuorma-autosta).
 
 ============================================================
 --- MYÖHEMMIN ---
