@@ -222,3 +222,39 @@ def test_demo_maintenance_linked_by_id(demo_client):
     assert rows and all(r[1] == "integer" and r[0] == r[2] for r in rows)
     urv = next(t for t in _listed(c).values() if t["plate_number"] == "URV-001")
     assert len(c.get(f"/api/trailers/{urv['id']}/maintenance").get_json()) == 2
+
+
+# ── PUT: puuttuva kenttä säilyy, null tyhjentää ───────────────────────
+
+def test_put_null_clears_optional_fields(client):
+    c, _ = client
+    trailer = _trailer(c, plate_number="NUL-T01", identifier="NT-1", leasing_rate=40,
+                       rental_rate=60, leasing_company="Demo Leasing Oy", status="Huollossa",
+                       features={"adr": True, "crane": True})
+    resp = c.put(f"/api/trailers/{trailer['id']}", json={
+        "plate_number": None, "leasing_rate": None, "leasing_company": None,
+        "status": None, "features": {"adr": None}})
+    assert resp.status_code == 200
+    updated = resp.get_json()["trailer"]
+    assert updated == trailer | {
+        "plate_number": None,            # rekisteri tyhjennetty → vaihtokori
+        "leasing_rate": 0,               # hinta null → 0
+        "leasing_company": None,
+        "status": "Vapaa",               # status null → oletus
+        "features": trailer["features"] | {"adr": False},
+    }
+    resp = c.put(f"/api/trailers/{trailer['id']}", json={"features": None})
+    assert resp.get_json()["trailer"]["features"] == {
+        "adr": False, "temperature_controlled": False, "tail_lift": False, "crane": False}
+
+
+def test_put_null_identifier_falls_back_to_plate(client):
+    c, _ = client
+    trailer = _trailer(c, plate_number="NUL-T02", identifier="NT-2")
+    resp = c.put(f"/api/trailers/{trailer['id']}", json={"identifier": None})
+    assert resp.get_json()["trailer"]["identifier"] == "NUL-T02"
+    swap = _trailer(c, identifier="VK-NUL")
+    resp = c.put(f"/api/trailers/{swap['id']}", json={"identifier": None})
+    assert resp.status_code == 400  # ei rekisteriä eikä tunnistetta
+    resp = c.put(f"/api/trailers/{swap['id']}", json={"trailer_type": None})
+    assert resp.status_code == 400

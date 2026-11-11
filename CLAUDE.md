@@ -70,6 +70,13 @@ alembic revision -m "kuvaus"            # uusi skeemamuutos
 - `app.py` ajaa käynnistyessään (`python app.py`, ei importissa) `migrate_db()` = upgrade head.
 - `migrate_*.py` ovat ohuita yhteensopivuuskääreitä (`upgrade head`), eivät lisää demodataa.
 - **Demodata ei kuulu migraatioihin.** Valmiita revisioita ei muokata — muutos = uusi revisio.
+- **FK-sarakkeisiin tyyppitarkistus (käytäntö):** uusi tai uudelleen luotava viiteavainsarake saa
+  `CHECK (typeof(sarake) = 'integer')` (nullable: `sarake IS NULL OR typeof(sarake) = 'integer'`).
+  SQLite tallentaa muuten hiljaa tekstiä INTEGER-sarakkeeseen (esim. rekisterinumeron id:n paikalle),
+  eikä viiteavaimia valvota (`PRAGMA foreign_keys` ei ole päällä). Mukana: `trailer_maintenance.trailer_id`.
+  Puuttuu vielä: `trips.trailer_id/carrier_id/tractor_id/unloading_terminal_id`, `orders.trip_id`,
+  `costs.trip_id`, `customer_rate_cards.customer_id`, `customer_billing_rules.customer_id`,
+  `tractors.carrier_id` (lisätään uudella revisiolla, kun taulu luodaan seuraavan kerran uudelleen).
 
 ### Rahamuoto
 
@@ -255,6 +262,16 @@ Trailereilla ei ole carrieria (leasing-pooli).
 - DELETE → 409, jos trailerilla on keikkoja (myös laskutettuja) tai huoltohistoriaa: aseta status Poistettu.
 - Huoltohistoria (`trailer_maintenance.trailer_id`) viittaa trailerin id:hen: rekisterin muutos ei irrota sitä,
   eikä samalla rekisterillä luotu uusi traileri peri vanhaa historiaa.
+
+**PUT `/api/tractors/:id` ja `/api/trailers/:id` ovat osittaisia:** puuttuva kenttä säilyttää arvonsa,
+`null` tyhjentää sen. Tyhjennys noudattaa kentän sääntöjä:
+- valinnainen kenttä → NULL (vetäjä: `make_model`, `emission_class`, kapasiteetti, `notes`;
+  traileri: `plate_number` → rekisteritön/vaihtokori, `leasing_company`)
+- pakollinen kenttä → 400 (vetäjä: `registration_number`, `carrier_id`, `vehicle_type`; traileri: `trailer_type`,
+  sekä `identifier`, jos rekisteriäkään ei ole)
+- oletusarvollinen kenttä → oletus (`status` → aktiivinen / Vapaa; trailerin `identifier` → rekisterinumero;
+  `leasing_rate`/`rental_rate` → 0)
+- `features`: puuttuva avain säilyy, `{"adr": null}` = false, `"features": null` = kaikki false
 
 **Tripin vetäjä** (`trips.tractor_id`, nullable): `tractor.carrier_id = trip.carrier_id`, muuten 400.
 Tripillä ei carrieria → carrier asetetaan vetäjältä. Poistettua vetäjää ei voi valita (jo valittu saa jäädä).

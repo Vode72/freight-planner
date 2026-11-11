@@ -927,10 +927,35 @@ GitHub: github.com/Vode72/freight-planner
 .gitignore: node_modules/, frontend/build/, __pycache__/ ja backend/freight.db jätetään pois
 (freight.db, build ja .pyc poistettu versionhallinnasta issuessa #14; historiaa ei siivottu)
 Viimeisin commit: Trailerien yksikäsitteisyys — Alembic 0005, huoltohistoria id:hen, Poistettu-status
-Vetäjärekisteri osa 2 (TULOSSA, frontend): HallintaKalusto Vetäjät-välilehti (TractorList/Form),
-  EquipmentFeatures, ResourcePicker ("hae tai luo" + pikalomake) TripFormiin,
-  CarrierList ja TripForm /api/trucks → /api/tractors (nyt rikki ilman osaa 2!),
-  TripDetail näyttää tractor_registration.
+VETÄJÄREKISTERI OSA 2 — SUUNNITELMALUONNOS (ODOTTAA HYVÄKSYNTÄÄ, ei koodattu)
+  Haara ccr-008b37d6-i2aqgm, draft-PR auki; yhdistetään vasta kun osa 2 + testit + CI vihreinä.
+  Nyt rikki ilman osaa 2: CarrierList, TripForm, HallintaKalusto/Vetäjät kutsuvat poistettua
+  /api/trucks; TrailerForm vaatii rekisterin (vaihtokoria ei voi luoda UI:sta).
+  1. useEquipmentMeta-hook (/api/equipment-meta): ominaisuudet, tyypit, statukset, päästöluokat.
+  2. EquipmentFeatures.jsx: ominaisuuksien checkboxit + badget (vetäjät ja trailerit).
+  3. TractorList.jsx (HallintaKalusto Vetäjät-välilehti, korvaa VetajatTab): haku, suodattimet
+     carrier/tyyppi/status, "näytä poistetut", status inline (osittainen PUT), DELETE 409 →
+     tarjoa "aseta poistetuksi". TractorForm.jsx (/tractors/new, /tractors/:id/edit):
+     kapasiteetti vain kuorma-autolle, 409 → linkki olemassa olevaan, updated_trips-toast.
+  4. Trailerit: TrailerForm rekisteri valinnainen (vaihtokori) + tunniste + Poistettu + ominaisuudet,
+     409 field/existing; TrailerList/TrailerTab "näytä poistetut", DELETE 409 → Poistettu.
+     Näyttö kaikkialla: rekisteri || tunniste.
+  5. ResourcePicker.jsx ("hae tai luo"): hakukenttä + suodatettu lista (näppäimistö ↑↓ Enter Esc,
+     aria-combobox), varoitus-renderöinti (huollossa → oranssi varoitus, ei estoa),
+     "+ Uusi" → inline-pikalomake (QuickTractorForm: rekisteri, carrier, tyyppi;
+     QuickTrailerForm: rekisteri tai tunniste, tyyppi). Onnistuminen → onCreated(row) valitsee.
+     409 → "Jo olemassa: X" + [Valitse tämä].
+  6. TripForm: vetäjävalikko /api/tractors?carrier_id=… (ei carrieria → kaikki, carrier näkyvissä);
+     vetäjän valinta ilman carrieria asettaa carrierin; carrierin vaihto tyhjentää eri carrierin
+     vetäjän; lähettää tractor_id (null tyhjennys), ei truck_plate; traileri valinnainen,
+     Poistetut piilossa; palvelimen 400-virhe kenttään.
+  7. CarrierList: inline-vetäjät /api/tractors-endpointilla, carrierin DELETE 409 -viesti.
+  8. TripDetail/TripList/DriverPage: truck_plate (dokumenttiarvo) + tractor_registration jos eri;
+     traileri rekisteri || tunniste.
+  9. Testit: RTL-testit ResourcePickerille (suodatus, pikaluonti, 409 → valitse olemassa oleva,
+     huollossa-varoitus) ja TripFormille (carrier-suodatus, carrier vetäjältä), fetch mockattuna.
+  Avoimet: frontend-CI-job + build-korjaus #26 osaksi osaa 2?; FK-typeof-revisio (9 saraketta,
+  CLAUDE.md) erillisenä issuena?; CLAUDE.md sanoo React 18, package.json react ^19.2.5.
 Issuet: #33 trips.trailer_plate-snapshot (rekisteri tai tunniste; ennen CMR/PDF:ää),
   #34 vaihtokori: tyyppi, kapasiteetti, hinnoittelu,
   #35 kuorma-auto tripillä (traileri piiloon, kapasiteetti kuorma-autosta).

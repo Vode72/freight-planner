@@ -101,12 +101,15 @@ def parse_features(data, errors, base=None):
     """``data["features"]`` → {sarake: 0/1}.
 
     base: lähtöarvot (olemassa oleva rivi tai tyypin oletus). Puuttuva
-    avain säilyttää lähtöarvon; tuntematon avain on virhe.
+    avain säilyttää lähtöarvon, null tyhjentää (= false): ``"features": null``
+    kaikki, ``{"adr": null}`` yhden. Tuntematon avain on virhe.
     """
     values = {key: 0 for key in FEATURE_KEYS} | dict(base or {})
-    features = data.get("features")
-    if features is None:
+    if "features" not in data:
         return values
+    features = data["features"]
+    if features is None:
+        return {key: 0 for key in FEATURE_KEYS}
     if not isinstance(features, dict):
         errors.append("features: odotettiin objekti, esim. {\"adr\": true}")
         return values
@@ -116,6 +119,9 @@ def parse_features(data, errors, base=None):
                       f"(sallitut: {', '.join(FEATURE_KEYS)})")
     for key in FEATURE_KEYS:
         if key in features:
+            if features[key] is None:
+                values[key] = 0
+                continue
             parsed = parse_bool(features[key], f"features.{key}", errors)
             if parsed is not None:
                 values[key] = parsed

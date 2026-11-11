@@ -657,3 +657,35 @@ def test_demo_thermo_trailers_have_temperature_control(demo_client):
     for trailer in c.get("/api/trailers").get_json():
         expected = trailer["trailer_type"] in equipment.TEMPERATURE_CONTROLLED_TRAILER_TYPES
         assert trailer["features"]["temperature_controlled"] is expected
+
+
+# ── PUT: puuttuva kenttä säilyy, null tyhjentää ───────────────────────
+
+def test_put_null_clears_optional_fields(carriers):
+    c, _, alfa, _ = carriers
+    truck = _tractor(c, alfa, "NUL-001", "kuorma-auto", make_model="Demo City 260",
+                     emission_class="EURO VI", max_weight=8000, max_ldm=7, max_volume=40,
+                     notes="Demo", status="huollossa",
+                     features={"adr": True, "crane": True, "tail_lift": True})
+    resp = c.put(f"/api/tractors/{truck['id']}", json={
+        "make_model": None, "emission_class": None, "max_weight": None, "notes": None,
+        "features": {"adr": None}})
+    assert resp.status_code == 200
+    updated = resp.get_json()["tractor"]
+    assert updated == truck | {"make_model": None, "emission_class": None, "max_weight": None,
+                               "notes": None, "features": truck["features"] | {"adr": False}}
+    # features: null tyhjentää kaikki, status: null → oletus aktiivinen
+    resp = c.put(f"/api/tractors/{truck['id']}", json={"features": None, "status": None})
+    tractor = resp.get_json()["tractor"]
+    assert tractor["features"] == FEATURES_OFF
+    assert tractor["status"] == "aktiivinen"
+    assert tractor["max_ldm"] == 7  # puuttuva kenttä säilyi
+
+
+@pytest.mark.parametrize("field", ["registration_number", "carrier_id", "vehicle_type"])
+def test_put_null_on_required_field_is_rejected(carriers, field):
+    c, _, alfa, _ = carriers
+    tractor = _tractor(c, alfa, "NUL-002")
+    resp = c.put(f"/api/tractors/{tractor['id']}", json={field: None})
+    assert resp.status_code == 400
+    assert c.get(f"/api/tractors/{tractor['id']}").get_json() == tractor
