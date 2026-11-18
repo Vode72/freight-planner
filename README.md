@@ -1,5 +1,7 @@
 # 🚛 Freight Planner
 
+> **Archived (November 2026).** Development of this prototype has stopped. Its ideas continue in [FleetFreight TMS](https://github.com/Vode72/fleetfreight-tms), which merges Freight Planner and FleetFlow Planner into one transport management system. This repository stays available as part of the portfolio.
+
 A full-stack Transport Management System (TMS) built as a portfolio project, demonstrating real-world logistics operations management. Inspired by real-world international freight forwarding workflows between Finland and Continental Europe.
 
 Designed to demonstrate how operational logistics expertise can be transformed into modern Transport Management System (TMS) software.
