@@ -24,9 +24,14 @@ function FuelRateManager() {
 
   const today = new Date().toISOString().slice(0, 10);
 
+  // Haku kerran mountissa; tallennus ja poisto hakevat uudelleen itse.
+  // fetchRates/fetchCurrent jätetään pois tarkoituksella: ne käyttävät useToast()-oliota,
+  // joka on uusi jokaisella renderöinnillä — riippuvuutena efekti ajettaisiin joka
+  // renderöinnin jälkeen ja setRates/setCurrentRate tekisi siitä loputtoman hakusilmukan.
   useEffect(() => {
     fetchRates();
     fetchCurrent();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchRates = async () => {

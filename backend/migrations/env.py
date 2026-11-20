@@ -2,7 +2,8 @@
 
 Yhteys tulee joko db_migrate-moduulilta (config.attributes["connection"])
 tai komentoriviltä: `alembic -x db=polku upgrade head`, oletuksena
-db_config.get_db_path().
+db_config.get_db_path(). Komentoriviltä ajettaessa olemassa olevasta,
+migroimattomasta kannasta otetaan ensin varmuuskopio (db_migrate.backup_if_pending).
 """
 import os
 import sqlite3
@@ -14,7 +15,7 @@ from alembic import context
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db_config import get_db_path  # noqa: E402
-from db_migrate import make_engine  # noqa: E402
+from db_migrate import backup_if_pending, make_engine  # noqa: E402
 
 config = context.config
 
@@ -44,6 +45,9 @@ def run_migrations_online():
         return
 
     db_path = context.get_x_argument(as_dictionary=True).get("db") or get_db_path()
+    backup_path = backup_if_pending(db_path)
+    if backup_path:
+        print(f"Varmuuskopio ennen migraatiota: {backup_path}")
     engine = make_engine(lambda: sqlite3.connect(db_path))
     try:
         with engine.connect() as connection:

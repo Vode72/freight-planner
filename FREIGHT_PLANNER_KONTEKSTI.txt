@@ -1,5 +1,5 @@
 FREIGHT PLANNER — PROJEKTIN KONTEKSTI VS CODE CLAUDELLE
-Päivitetty: 09.11.2026 (v13)
+Päivitetty: 11.11.2026 (v14)
 ============================================================
 
 ROOLI:
@@ -10,7 +10,7 @@ Freight Planner on TMS-tyylinen kuljetustenhallintatyökalu.
 Kaikki data on keksittyä demodataa — ei oikeita asiakasnimiä, rekkareita tai työdataa.
 
 TEKNINEN STACK:
-- Frontend: React 18, JavaScript, inline CSS
+- Frontend: React 19 (react-scripts 5), JavaScript, inline CSS
 - Teema: tumma #0f172a, oranssi aksentti #f97316
 - Backend: Python Flask, SQLite (freight.db, polku FREIGHT_DB_PATH tai backend/freight.db,
   ei versionhallinnassa — luodaan: python reset_demo.py)
@@ -28,6 +28,12 @@ Alembic: backend/alembic.ini + backend/migrations/ (render_as_batch=True)
   0002_reference_data palvelukoodisto + 401/831→400/830, oletusasetukset,
                       fuel_rates → surcharge_rates (vanhat kannat)
   0003_money_integer  REAL-rahasarakkeet → INTEGER (*_cents / *_e4)
+  0004_tractors       vetäjärekisteri: tractors-taulu (trucks siirretty + pudotettu),
+                      ominaisuussarakkeet trailereille, trips.tractor_id
+  0005_trailer_identity trailers: rekisteri valinnainen + uniikki, tunniste pakollinen + uniikki,
+                      status-CHECK (+ Poistettu), huoltohistoria trailers.id-viitteeksi
+  Varmuuskopio: upgrade_db() ja alembic-CLI kopioivat olemassa olevan, migroimattoman
+  kannan ensin tiedostoon <kanta>.bak-<revisio>-<aikaleima> (db_migrate.backup_if_pending).
   Ajo: cd backend && alembic upgrade head  (tai -x db=polku)
   Koodista: db_migrate.upgrade_db(polku) / upgrade_connection(conn).
   init_db.create_schema(conn) = upgrade head. app.migrate_db() = upgrade head
@@ -54,7 +60,10 @@ TIETOKANTA — TAULUT
 
 trips:
   trip_id (TRP-2026-001), status, reitti (first_pickup / trip_end),
-  transport_type, carrier_id, trailer_id, trailer_type, truck_plate,
+  transport_type, carrier_id, trailer_id (valinnainen), trailer_type,
+  tractor_id ✅ (nullable FK → tractors; tractor.carrier_id = trip.carrier_id),
+  truck_plate ✅ (palvelimen täyttämä kopio vetäjän rekisteristä; rekisterin korjaus päivittää
+    laskuttamattomat keikat, laskutetut jäädytetty — dokumentit),
   loading_date/time, delivery_date/time, fixed_delivery_date,
   ferry_route, ferry_departure, ferry_arrival,
   adr, tail_lift, temperature_controlled,
@@ -163,6 +172,12 @@ fuel_rates: ⚠️ VANHENTUNUT — vain siirron lähde, koodi ei lue tai kirjoit
 
 trailers: (12 kpl Demo Trailer Leasing Oy)
   plate_number, identifier, trailer_type, leasing_rate_cents, rental_rate_cents, status
+  ominaisuudet ✅ (0004): adr, temperature_controlled, tail_lift, crane (0/1, sama rakenne
+    kuin tractors; API: features-objekti). Lämpösäätö oletuksena thermo-tyypeille.
+  ✅ 0005: plate_number valinnainen (vaihtokori), uniikki kun ei NULL; identifier pakollinen,
+    uniikki (tyhjä → rekisteri); status Vapaa/Käytössä/Huollossa/Poistettu (Poistettu piilossa,
+    ?include_removed=1). DELETE 409 jos keikkoja tai huoltohistoriaa → status Poistettu.
+  Pikaluonti: POST /api/trailers {trailer_type, plate_number tai identifier}; varattu → 409 + existing.
   Tyypit: Umpikaappi (42/65€), Sivuaukeava (45/70€),
           Umpikaappi 2-koneinen (43/67€), Pressutrailer (35/54€), Megatrailer (38/59€)
   ✅ VALMIS (Feature 7A):
@@ -174,7 +189,7 @@ trailers: (12 kpl Demo Trailer Leasing Oy)
   maintenance_notes     (vapaa teksti, huoltofirma jne.)
 
 trailer_maintenance: ✅ VALMIS
-  id, trailer_id, maintenance_type (INSPECTION/REFRIGERATION/OTHER),
+  id, trailer_id (INTEGER → trailers.id, 0005; ennen rekisteriteksti), maintenance_type (INSPECTION/REFRIGERATION/OTHER),
   date, next_due, notes, created_at
   (historia kaikista huolloista ja katsastuksista)
 
@@ -184,10 +199,20 @@ carriers: (6 kuljetusyhtiötä — 3 FI, 3 EU)
   name, country, city, business_id, contact_person, phone
   ── TULOSSA: vat_number ──
 
-trucks: (12 vetäjää — 2 per yhtiö)
-  plate_number, carrier_id, status
-  Tunnukset: NRF-001/002, BLR-001/002, PHK-001/002,
-             ETR-001/002, CTC-001/002, SCL-001/002
+tractors: ✅ VALMIS (vetäjärekisteri, Alembic 0004 — korvasi trucks-taulun)
+  registration_number (uniikki, isot kirjaimet, COLLATE NOCASE), carrier_id (NOT NULL),
+  vehicle_type (vetoauto/kuorma-auto), make_model, emission_class (EURO III–VI, EEV),
+  status (aktiivinen/huollossa/poistettu),
+  max_weight (kg), max_ldm, max_volume (m³) — vain kuorma-autolle (CHECK),
+  adr, temperature_controlled, tail_lift, crane (0/1), notes, created_at
+  Logiikka ja koodistot: backend/equipment.py (FEATURES, validate_tractor, meta).
+  Demo: 12 vetoautoa NRF-001/002, BLR-001/002, PHK-001/002, ETR-001/002,
+        CTC-001/002, SCL-001/002 (PHK-002 huollossa, ETR-* ADR) +
+        2 kuorma-autoa NRF-101 (lämpö + takalaita), PHK-101 (nosturi). Mallit "Demo …".
+  Säännöt: tripin vetäjän carrier = tripin carrier (muuten 400); tripillä ei carrieria →
+    carrier vetäjältä; poistettua vetäjää ei voi valita; vetäjän carrierin vaihto 409,
+    jos laskuttamaton trip; käytetyn vetäjän poisto 409 (status poistettu tilalle);
+    kuljetusyhtiön poisto 409, jos sillä on vetäjiä (ei ketjupoistoa).
 
 customers: ✅ VALMIS
   name, address, country, zip, city,
@@ -342,10 +367,12 @@ Carriers:   GET /api/carriers
             POST /api/carriers
             PUT /api/carriers/:id
             DELETE /api/carriers/:id
-Trucks:     GET /api/trucks?carrier_id=
-            POST /api/trucks
-            PUT /api/trucks/:id
-            DELETE /api/trucks/:id
+Tractors:   GET /api/tractors?carrier_id=&vehicle_type=&status=&q=&include_removed=1
+            GET/PUT/DELETE /api/tractors/:id   (PUT osittainen)
+            POST /api/tractors   (pikaluonti: registration_number, carrier_id, vehicle_type;
+                                  vastaus {id, tractor}; varattu rekisteri → 409 + existing)
+            GET /api/equipment-meta  (ominaisuudet, tyypit, statukset, päästöluokat, trailerityypit)
+            /api/trucks POISTETTU (0004)
 Trips:      GET/POST /api/trips, GET/PUT/DELETE /api/trips/:id
             GET palauttaa total_weight, total_loading_meters, total_volume
             PUT /api/trips/:id/status
@@ -899,7 +926,61 @@ GIT-Tilanne
 GitHub: github.com/Vode72/freight-planner
 .gitignore: node_modules/, frontend/build/, __pycache__/ ja backend/freight.db jätetään pois
 (freight.db, build ja .pyc poistettu versionhallinnasta issuessa #14; historiaa ei siivottu)
-Viimeisin commit: Feature 7B — Asetukset-sivu (settings-taulu, yritystiedot, ilmoitukset)
+Viimeisin commit: Trailerien yksikäsitteisyys — Alembic 0005, huoltohistoria id:hen, Poistettu-status
+VETÄJÄREKISTERI OSA 2 — SUUNNITELMALUONNOS (ODOTTAA HYVÄKSYNTÄÄ, ei koodattu)
+  Haara ccr-008b37d6-i2aqgm, draft-PR auki; yhdistetään vasta kun osa 2 + testit + CI vihreinä.
+  Nyt rikki ilman osaa 2: CarrierList, TripForm, HallintaKalusto/Vetäjät kutsuvat poistettua
+  /api/trucks; TrailerForm vaatii rekisterin (vaihtokoria ei voi luoda UI:sta).
+  0. ENSIN (ennen komponentteja, CI vihreäksi): #26 + frontend-CI-job (npm ci, build, testit).
+     TEHTY 11.11.2026: lock synkkaan, 4 ESLint-varoitusta korjattu (AddToTripModal ja DriverPage:
+     haku efektin sisään, ajokerrat ennallaan; FuelRateManager eslint-disable + perustelu;
+     CustomerForm grid2 pois), .github/workflows/frontend.yml (npm ci → ESLint --max-warnings=0 →
+     CI=true npm test → CI=false build). Komponentit vasta kun CI vihreä.
+     Selvitys 11.11.2026 (node 22.23 / npm 10.9, Linux, repon ulkopuolinen kopio):
+     - npm ci kaatuu: lock-tiedostosta puuttuu yksi rivi (tailwindcss/node_modules/yaml@2.9.1);
+       npm install korjaa, eikä muuta lockissa mitään muuta → lock uudelleen + commit.
+     - "jest/globals is unknown" EI toistu puhtaalla asennuksella (eslint-plugin-jest 25.7.0, myös
+       28/29 sisältävät environments-määrittelyn) → todennäköisesti paikallinen node_modules-tila;
+       varmistetaan CI:ssä (ubuntu) puhtaalla npm ci:llä.
+     - EI React 19 -yhteensopivuusongelma: ei peer-ristiriitoja (npm ls puhdas), npm test vihreä,
+       CI=false build kääntyy.
+     - UUSI ESTE CI:lle: CI=true tekee varoituksista virheitä → build kaatuu:
+       (a) ESLint-varoitukset: 3× react-hooks/exhaustive-deps (AddToTripModal, DriverPage,
+           FuelRateManager), 1× no-unused-vars (CustomerForm grid2);
+       (b) webpack "Critical dependency: the request of a dependency is an expression" lähteestä
+           node_modules/react-datepicker/dist/index.es.js (riippuvuus, ei omaa koodia).
+       Ratkaisuehdotus hyväksyttäväksi: (a) korjataan koodiin (exhaustive-deps useCallbackilla,
+       ei toiminnallista muutosta) ja (b) build CI:ssä CI=false + erillinen ESLint-ajo
+       --max-warnings=0, jotta omat varoitukset kaatavat CI:n mutta riippuvuuden webpack-varoitus ei.
+     - Testit: vain tyhjä App.test.js — osan 2 RTL-testit tuovat oikeat testit.
+  1. useEquipmentMeta-hook (/api/equipment-meta): ominaisuudet, tyypit, statukset, päästöluokat.
+  2. EquipmentFeatures.jsx: ominaisuuksien checkboxit + badget (vetäjät ja trailerit).
+  3. TractorList.jsx (HallintaKalusto Vetäjät-välilehti, korvaa VetajatTab): haku, suodattimet
+     carrier/tyyppi/status, "näytä poistetut", status inline (osittainen PUT), DELETE 409 →
+     tarjoa "aseta poistetuksi". TractorForm.jsx (/tractors/new, /tractors/:id/edit):
+     kapasiteetti vain kuorma-autolle, 409 → linkki olemassa olevaan, updated_trips-toast.
+  4. Trailerit: TrailerForm rekisteri valinnainen (vaihtokori) + tunniste + Poistettu + ominaisuudet,
+     409 field/existing; TrailerList/TrailerTab "näytä poistetut", DELETE 409 → Poistettu.
+     Näyttö kaikkialla: rekisteri || tunniste.
+  5. ResourcePicker.jsx ("hae tai luo"): hakukenttä + suodatettu lista (näppäimistö ↑↓ Enter Esc,
+     aria-combobox), varoitus-renderöinti (huollossa → oranssi varoitus, ei estoa),
+     "+ Uusi" → inline-pikalomake (QuickTractorForm: rekisteri, carrier, tyyppi;
+     QuickTrailerForm: rekisteri tai tunniste, tyyppi). Onnistuminen → onCreated(row) valitsee.
+     409 → "Jo olemassa: X" + [Valitse tämä].
+  6. TripForm: vetäjävalikko /api/tractors?carrier_id=… (ei carrieria → kaikki, carrier näkyvissä);
+     vetäjän valinta ilman carrieria asettaa carrierin; carrierin vaihto tyhjentää eri carrierin
+     vetäjän; lähettää tractor_id (null tyhjennys), ei truck_plate; traileri valinnainen,
+     Poistetut piilossa; palvelimen 400-virhe kenttään.
+  7. CarrierList: inline-vetäjät /api/tractors-endpointilla, carrierin DELETE 409 -viesti.
+  8. TripDetail/TripList/DriverPage: truck_plate (dokumenttiarvo) + tractor_registration jos eri;
+     traileri rekisteri || tunniste.
+  9. Testit: RTL-testit ResourcePickerille (suodatus, pikaluonti, 409 → valitse olemassa oleva,
+     huollossa-varoitus) ja TripFormille (carrier-suodatus, carrier vetäjältä), fetch mockattuna.
+  Päätetty: frontend-CI + #26 osan 2 ensimmäinen tehtävä; FK-typeof oma issue #37 (ei osaan 2);
+  React 19 kirjattu dokumentaatioon. Session alussa tarkistetaan CI-tila (CLAUDE.md).
+Issuet: #33 trips.trailer_plate-snapshot (rekisteri tai tunniste; ennen CMR/PDF:ää),
+  #34 vaihtokori: tyyppi, kapasiteetti, hinnoittelu,
+  #35 kuorma-auto tripillä (traileri piiloon, kapasiteetti kuorma-autosta).
 
 ============================================================
 --- MYÖHEMMIN ---

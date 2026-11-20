@@ -1,7 +1,7 @@
 # Freight Planner — CLAUDE.md
 
 TMS-tyylinen kuljetustenhallintatyökalu portfolioprojektina.
-React 18 + Python Flask + SQLite. Kaikki data on keksittyä demodataa.
+React 19 (Create React App / react-scripts 5) + Python Flask + SQLite. Kaikki data on keksittyä demodataa.
 
 ---
 
@@ -56,14 +56,27 @@ alembic revision -m "kuvaus"            # uusi skeemamuutos
 | `0001_baseline` | Skeema sellaisenaan kuin se oli ennen Alembicia. Ei muuta dataa; olemassa olevaan kantaan lisää vain puuttuvat taulut/sarakkeet |
 | `0002_reference_data` | Palvelukoodisto + 401→400, 831→830, oletusasetukset, fuel_rates → surcharge_rates (vanhat kannat) |
 | `0003_money_integer` | REAL-rahasarakkeet → INTEGER (`*_cents`, `*_e4`), muunnos Decimalina, downgrade mukana |
+| `0004_tractors` | Vetäjärekisteri `tractors` (trucks-rivit siirretään, taulu pudotetaan), ominaisuussarakkeet trailereille, `trips.tractor_id`, downgrade mukana |
+| `0005_trailer_identity` | Trailerin rekisteri valinnainen + uniikki kun ei NULL, tunniste pakollinen + uniikki, status-CHECK (+ Poistettu), `trailer_maintenance.trailer_id` → INTEGER FK `trailers.id`. Pysähtyy tuplista, orvoista huolloista (tulostaa siivous-SQL:n) ja tuntemattomasta statuksesta; downgrade pysähtyy rekisterittömiin trailereihin |
 
 - Koko upgrade on yksi transaktio: virhe ei jätä kantaa puolitiehen.
+- **Varmuuskopio ennen migraatiota:** `upgrade_db()` (myös `app.migrate_db()`) ja `alembic`-CLI
+  kopioivat olemassa olevan kannan, jonka revisio ei ole head, ensin tiedostoon
+  `<kanta>.bak-<revisio>-<aikaleima>` (`db_migrate.backup_if_pending`, SQLiten backup-API).
+  Uutta/tyhjää kantaa ei kopioida. Kopiot ovat `.gitignore`ssa.
 - Koodista: `db_migrate.upgrade_db(polku)` tai `upgrade_connection(conn)` (myös muistikanta).
   `init_db.create_schema(conn)` = upgrade head. Jokaisen upgraden jälkeen palvelukoodisto
   synkronoidaan `services.SERVICES`-listasta.
 - `app.py` ajaa käynnistyessään (`python app.py`, ei importissa) `migrate_db()` = upgrade head.
 - `migrate_*.py` ovat ohuita yhteensopivuuskääreitä (`upgrade head`), eivät lisää demodataa.
 - **Demodata ei kuulu migraatioihin.** Valmiita revisioita ei muokata — muutos = uusi revisio.
+- **FK-sarakkeisiin tyyppitarkistus (käytäntö):** uusi tai uudelleen luotava viiteavainsarake saa
+  `CHECK (typeof(sarake) = 'integer')` (nullable: `sarake IS NULL OR typeof(sarake) = 'integer'`).
+  SQLite tallentaa muuten hiljaa tekstiä INTEGER-sarakkeeseen (esim. rekisterinumeron id:n paikalle),
+  eikä viiteavaimia valvota (`PRAGMA foreign_keys` ei ole päällä). Mukana: `trailer_maintenance.trailer_id`.
+  Puuttuu vielä: `trips.trailer_id/carrier_id/tractor_id/unloading_terminal_id`, `orders.trip_id`,
+  `costs.trip_id`, `customer_rate_cards.customer_id`, `customer_billing_rules.customer_id`,
+  `tractors.carrier_id` (lisätään uudella revisiolla, kun taulu luodaan seuraavan kerran uudelleen).
 
 ### Rahamuoto
 
@@ -103,12 +116,22 @@ cd backend
 pytest tests/ -v
 ```
 
-Frontend:
+Frontend (samat vaiheet kuin CI:ssä, `.github/workflows/frontend.yml`):
 
 ```bash
 cd frontend
-npm test
+npm ci
+npx eslint --ext .js,.jsx --max-warnings=0 src   # omat varoitukset = virhe
+CI=true npm test -- --watchAll=false             # CI=true: ei watch-tilaa
+CI=false npm run build                           # CI=false vain buildissa
 ```
+
+`CI=false` buildissa, koska react-scripts tekisi muuten virheen myös riippuvuuden
+webpack-varoituksesta (`react-datepicker`: "Critical dependency: the request of a dependency
+is an expression"). Omat lint-varoitukset estetään ESLint-vaiheessa.
+Tarkoituksella pois jätetty hook-riippuvuus: `// eslint-disable-next-line react-hooks/exhaustive-deps`
++ perustelu kommenttina (ei pakotettua `useCallback`ia). Huom: `useToast()` palauttaa uuden olion
+joka renderöinnillä, joten sitä ei voi käyttää efektin riippuvuutena.
 
 ---
 
@@ -123,10 +146,11 @@ freight-planner/
 │   ├── surcharges.py             # Lisähinnat: calculate_surcharge, derive_trade_type, demodata
 │   ├── customer_pricing.py       # Asiakashinnasto + lisäsäännöt: find_rate_card, get_billing_rule
 │   ├── money.py                  # Rahamuunnokset: Decimal ↔ *_cents / *_e4 ↔ API
+│   ├── equipment.py              # Kalusto: ominaisuudet (FEATURES), vetäjien koodistot ja validointi
 │   ├── db_config.py              # get_db_path(): FREIGHT_DB_PATH / backend/freight.db
 │   ├── db_migrate.py             # Alembic koodista: upgrade_db / upgrade_connection
 │   ├── alembic.ini
-│   ├── migrations/               # Alembic: env.py + versions/0001–0003
+│   ├── migrations/               # Alembic: env.py + versions/0001–0005
 │   ├── reset_demo.py             # Puhdas demokanta yhdellä komennolla
 │   ├── init_db.py                # create_schema() (= upgrade head) + seed_demo_data() + reset_db()
 │   ├── migrate_*.py              # Yhteensopivuuskääreet: alembic upgrade head
@@ -134,7 +158,9 @@ freight-planner/
 │   ├── pytest.ini
 │   └── tests/
 │       ├── conftest.py           # Testifixturet (tmp_path-kanta, Alembic + demodata)
-│       ├── test_alembic.py       # Migraatiot: tyhjä/vanha kanta, rahamuunnos, downgrade, rollback, CLI
+│       ├── test_alembic.py       # Migraatiot: tyhjä/vanha kanta, rahamuunnos, trucks→tractors, trailerien yksikäsitteisyys, downgrade, rollback, CLI, varmuuskopio
+│       ├── test_tractors.py      # Vetäjät: CRUD, carrier-validointi, pikaluonti, ominaisuudet (myös trailerit)
+│       ├── test_trailers.py      # Trailerit: rekisteri/tunniste 409, vaihtokori, Poistettu, DELETE 409, huoltohistoria id:llä
 │       ├── test_money.py         # Rahapyöristys (0,1 + 0,2), Decimal ↔ sentit, API-muoto
 │       ├── test_id_gen.py        # ID-generoinnin testit
 │       ├── test_services.py      # Palvelukoodiston ja migraation testit
@@ -219,8 +245,67 @@ sama vastausmuoto, `multiplier = 1 + rate / 100`.
 
 ---
 
+## Kalusto: vetäjät ja trailerit
+
+**Vetäjärekisteri** on `tractors`-taulussa (`/api/tractors`, CRUD; korvasi `trucks`-taulun ja `/api/trucks`:n).
+Koodistot ja validointi ovat `backend/equipment.py`:ssä (`GET /api/equipment-meta`).
+- `registration_number` uniikki: tallennetaan trimmattuna isoin kirjaimin, `UNIQUE COLLATE NOCASE`;
+  varattu rekisteri → 409 + `existing`-rivi (UI voi tarjota olemassa olevaa).
+- `vehicle_type` vetoauto / kuorma-auto; `max_weight` (kg), `max_ldm`, `max_volume` (m³) vain
+  kuorma-autolle (API 400 + `CHECK`). `status` aktiivinen / huollossa / poistettu (poistetut piilossa listasta).
+- POST palauttaa koko rivin (`{id, tractor}`): pikaluonti = `registration_number` + `carrier_id` + `vehicle_type`.
+  PUT on osittainen. Käytetyn vetäjän DELETE → 409 (aseta status poistettu); kuljetusyhtiön DELETE → 409,
+  jos sillä on vetäjiä (ei ketjupoistoa).
+
+**Ominaisuudet** (`adr`, `temperature_controlled`, `tail_lift`, `crane`) ovat samannimisiä 0/1-sarakkeita
+sekä `tractors`- että `trailers`-taulussa (samat nimet kuin trips/orders-lipuilla). API:ssa molemmilla
+`features: {"adr": false, …}`. Uusi ominaisuus = uusi Alembic-revisio + `equipment.FEATURES`.
+Trailereilla ei ole carrieria (leasing-pooli).
+
+**Trailerit** (`/api/trailers`, Alembic 0005):
+- `plate_number` valinnainen (vaihtokoreilla ei rekisteriä), normalisoitu kuten vetäjillä, uniikki kun ei NULL;
+  `identifier` pakollinen ja uniikki (kirjainkoosta riippumatta), tyhjä tunniste = rekisterinumero.
+- Pikaluonti: `trailer_type` + `plate_number` tai `identifier` (lämpösäätö tyypin mukaan). Varattu rekisteri
+  tai tunniste → 409 + `field` + `existing` (POST ja PUT). PUT on osittainen.
+- `status` Vapaa / Käytössä / Huollossa / Poistettu. Poistetut piilossa (`?include_removed=1` näyttää);
+  Poistettua traileria ei voi valita uudelle keikalle (jo valittu saa jäädä).
+- DELETE → 409, jos trailerilla on keikkoja (myös laskutettuja) tai huoltohistoriaa: aseta status Poistettu.
+- Huoltohistoria (`trailer_maintenance.trailer_id`) viittaa trailerin id:hen: rekisterin muutos ei irrota sitä,
+  eikä samalla rekisterillä luotu uusi traileri peri vanhaa historiaa.
+
+**PUT `/api/tractors/:id` ja `/api/trailers/:id` ovat osittaisia:** puuttuva kenttä säilyttää arvonsa,
+`null` tyhjentää sen. Tyhjennys noudattaa kentän sääntöjä:
+- valinnainen kenttä → NULL (vetäjä: `make_model`, `emission_class`, kapasiteetti, `notes`;
+  traileri: `plate_number` → rekisteritön/vaihtokori, `leasing_company`)
+- pakollinen kenttä → 400 (vetäjä: `registration_number`, `carrier_id`, `vehicle_type`; traileri: `trailer_type`,
+  sekä `identifier`, jos rekisteriäkään ei ole)
+- oletusarvollinen kenttä → oletus (`status` → aktiivinen / Vapaa; trailerin `identifier` → rekisterinumero;
+  `leasing_rate`/`rental_rate` → 0)
+- `features`: puuttuva avain säilyy, `{"adr": null}` = false, `"features": null` = kaikki false
+
+**Tripin vetäjä** (`trips.tractor_id`, nullable): `tractor.carrier_id = trip.carrier_id`, muuten 400.
+Tripillä ei carrieria → carrier asetetaan vetäjältä. Poistettua vetäjää ei voi valita (jo valittu saa jäädä).
+PUT ilman `tractor_id`-avainta säilyttää vetäjän, `null` poistaa sen. Vetäjän carrierin vaihto → 409,
+jos se on laskuttamattomalla tripillä. Traileri on tripillä valinnainen.
+
+**`trips.truck_plate` on palvelimen täyttämä snapshot**, ei asiakkaan syöte. Peruste: laskutetun
+keikan dokumentit (Transport Order, CMR, lasku) on annettu sillä rekisterinumerolla, joka keikalla oli —
+jos vetäjän rekisteri myöhemmin korjataan tai vetäjä siirtyy toiselle carrierille, laskutetun keikan
+dokumenttitieto ei saa muuttua. Laskuttamattomilla keikoilla kopio seuraa vetäjää, jotta tulevat
+dokumentit tulostuvat korjatulla rekisterillä. Siksi: vetäjä valitaan → kopio rekisteristä; sama vetäjä →
+kopio säilyy; vetäjä vaihtuu → uusi kopio; vetäjä poistetaan keikalta → NULL; vetäjän rekisteriä
+muokataan (`PUT /api/tractors/:id`) → kopio päivitetään kaikille sen laskuttamattomille keikoille
+(vastauksessa `updated_trips`), laskutetut pysyvät jäädytettyinä. Nykyinen rekisteri tulee kyselyissä
+kentässä `tractor_registration`. Vanhat keikat, joita 0004 ei voinut linkittää (rekisteri/carrier ei
+täsmännyt), säilyttävät tekstinsä.
+
+---
+
 ## Työskentelysäännöt
 
+- **Session alussa tarkista CI-tila** avoimen haaran/PR:n viimeisimmästä commitista (GitHub Actions).
+  Jos CI epäonnistuu: raportoi syy ja korjausehdotus — **älä pushaa korjausta ilman hyväksyntää**.
+  PR:iä ei seurata jatkuvasti.
 - Tee **aina ensin suunnitelma** ja odota hyväksyntää ennen koodausta
 - Työskentele **omassa haarassa** — yhdistä main-haaraan vasta kun testit menevät läpi
 - **Ei viittauksia oikeisiin työnantajiin tai yrityksiin** — käytä aina demodataa

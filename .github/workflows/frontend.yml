@@ -1,0 +1,44 @@
+name: Frontend
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies (npm ci)
+        run: npm ci
+
+      # Omat ESLint-varoitukset kaatavat CI:n (sama konfiguraatio kuin react-scriptsillä).
+      - name: ESLint
+        run: npx eslint --ext .js,.jsx --max-warnings=0 src
+
+      # CI=true: react-scripts test ajaa kerran eikä jää watch-tilaan.
+      - name: Tests
+        run: npm test -- --watchAll=false
+        env:
+          CI: "true"
+
+      # CI=false vain buildissa: react-scripts tekisi muuten kaikista varoituksista virheitä,
+      # myös riippuvuuden webpack-varoituksesta (react-datepicker: "Critical dependency:
+      # the request of a dependency is an expression"), jota ei voi korjata omassa koodissa.
+      # Omat lint-varoitukset on jo estetty ESLint-vaiheessa.
+      - name: Build
+        run: npm run build
+        env:
+          CI: "false"
